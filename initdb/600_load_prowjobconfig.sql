@@ -1,0 +1,1 @@
+-- copy prowjobconfig (cfg) from '/tmp/infrasnoop-jobs.json' csv quote e'\x01' delimiter e'\x02';

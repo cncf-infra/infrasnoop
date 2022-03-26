@@ -1,0 +1,48 @@
+#+TITLE: Tables, Views, Functions
+#+PROPERTY: header-args:sql-mode :product postgres :noweb yes :comments no :results silent
+
+* Purpose
+    A database that includes k8s-infra prow, test-grid, artifacts.
+
+* Setup
+** Create Schem
+
+* scratch
+
+   #+NAME: openapi
+   #+begin_src sql-mode
+     create table prowjobconfig (
+       name text,
+       cfg jsonb
+     );
+   #+end_src
+* Tables
+** Public
+*** prowjobconfig
+   :PROPERTIES:
+   :header-args: :tangle ./postgres/initdb/100_table_prowjobconfig.sql
+   :END:
+   #+NAME: openapi
+   #+begin_src sql-mode
+     create table prowjobconfig (
+       name text,
+       cfg jsonb
+     );
+   #+end_src
+
+   #+NAME: open_api comments
+   #+begin_src sql-mode :tangle no
+     comment on table prowjobconfig is 'all prow yaml job configs as a single table';
+     comment on column prowjobconfig.name is 'name of prow job';
+     comment on column prowjobconifg.cfg 'config of prow job';
+   #+end_src
+
+* Bootstrap Scripts
+** Load Prow Job Config
+:PROPERTIES:
+   :header-args: :tangle ./postgres/initdb/600_load_prowjobconfig.sql
+   :END:
+#+NAME: Load all open api
+#+begin_src sql-mode
+copy prowjobconfig (data) from '/tmp/infrasnoop-jobs.json' csv quote e'\x01' delimiter e'\x02';
+#+end_src

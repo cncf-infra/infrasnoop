@@ -1,0 +1,24 @@
+#+TITLE: a
+
+#+name: local sql connections
+#+begin_src elisp
+(symbol-value 'sql-connection-alist)
+#+end_src
+
+#+RESULTS: local sql connections
+#+begin_src elisp
+((none
+  (sql-product 'postgres)
+  (sql-user "k8s-infra")
+  (sql-database "k8s-infra")
+  (sql-port 5432)
+  (sql-server "infradb.infrasnoop")))
+#+end_src
+
+#+begin_src sql-mode
+select 1;
+#+end_src
+
+#+begin_src bq
+select 1 ;
+#+end_src
