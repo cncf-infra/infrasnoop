@@ -1,0 +1,360 @@
+#+TITLE: ii
+* namespace
+#+begin_src shell :results none
+kubectl create ns infrasnoop || true
+kubectl config set-context --current --namespace=infrasnoop
+#+end_src
+* tilt
+#+begin_src tmate :session tilt :window tilt
+tilt up --legacy
+#+end_src
+* psql-ui
+Might revisit this
+#+begin_src tmate :session tilt :window fwd-psql-ui
+kubectl port-forward -n default service/postgres-operator-ui 8080:80
+#+end_src
+
+* database
+#+begin_src shell :results none
+kubectl apply -f ./postgresql.yaml
+#+end_src
+
+#+begin_src shell :results none
+kubectl get postgresqls -o yaml k8s-infra
+#+end_src
+
+#+begin_src shell :results none
+kubectl delete -n default pod k8s-infra-0
+#+end_src
+
+#+begin_src shell :results none
+kubectl delete postgresql.acid.zalan.do/k8s-infra
+#+end_src
+
+
+#+begin_src shell
+kubectl get pods
+#+end_src
+
+#+RESULTS:
+#+begin_example
+NAME                                    READY   STATUS                  RESTARTS       AGE
+k8s-infra-0                             0/1     Init:CrashLoopBackOff   7 (105s ago)   14m
+postgres-operator-569b58b8c6-xfhps      1/1     Running                 0              16m
+postgres-operator-ui-585f5566b4-h8ns5   1/1     Running                 0              16m
+#+end_example
+
+#+begin_src shell :wrap src yaml
+kubectl get pods k8s-infra-0 -o yaml
+#+end_src
+
+#+RESULTS:
+#+begin_src yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  creationTimestamp: "2022-03-26T22:23:21Z"
+  generateName: k8s-infra-
+  labels:
+    application: spilo
+    cluster-name: k8s-infra
+    controller-revision-hash: k8s-infra-5fb65fd9ff
+    statefulset.kubernetes.io/pod-name: k8s-infra-0
+    team: k8s
+  name: k8s-infra-0
+  namespace: default
+  ownerReferences:
+  - apiVersion: apps/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: StatefulSet
+    name: k8s-infra
+    uid: 2def1246-c880-4161-9585-fdbc24cf3c16
+  resourceVersion: "820"
+  uid: 0551cf02-9396-4da7-9755-0808f195d509
+spec:
+  containers:
+  - env:
+    - name: SCOPE
+      value: k8s-infra
+    - name: PGROOT
+      value: /home/postgres/pgdata/pgroot
+    - name: POD_IP
+      valueFrom:
+        fieldRef:
+          apiVersion: v1
+          fieldPath: status.podIP
+    - name: POD_NAMESPACE
+      valueFrom:
+        fieldRef:
+          apiVersion: v1
+          fieldPath: metadata.namespace
+    - name: PGUSER_SUPERUSER
+      value: postgres
+    - name: KUBERNETES_SCOPE_LABEL
+      value: cluster-name
+    - name: KUBERNETES_ROLE_LABEL
+      value: spilo-role
+    - name: PGPASSWORD_SUPERUSER
+      valueFrom:
+        secretKeyRef:
+          key: password
+          name: postgres.k8s-infra.credentials.postgresql.acid.zalan.do
+    - name: PGUSER_STANDBY
+      value: standby
+    - name: PGPASSWORD_STANDBY
+      valueFrom:
+        secretKeyRef:
+          key: password
+          name: standby.k8s-infra.credentials.postgresql.acid.zalan.do
+    - name: PAM_OAUTH2
+      value: https://info.example.com/oauth2/tokeninfo?access_token= uid realm=/employees
+    - name: HUMAN_ROLE
+      value: zalandos
+    - name: PGVERSION
+      value: "14"
+    - name: KUBERNETES_LABELS
+      value: '{"application":"spilo"}'
+    - name: SPILO_CONFIGURATION
+      value: '{"postgresql":{},"bootstrap":{"initdb":[{"auth-host":"md5"},{"auth-local":"trust"}],"users":{"zalandos":{"password":"","options":["CREATEDB","NOLOGIN"]}},"dcs":{}}}'
+    - name: DCS_ENABLE_KUBERNETES_API
+      value: "true"
+    - name: ENABLE_WAL_PATH_COMPAT
+      value: "true"
+    image: registry.opensource.zalan.do/acid/spilo-14:2.1-p3
+    imagePullPolicy: IfNotPresent
+    name: postgres
+    ports:
+    - containerPort: 8008
+      protocol: TCP
+    - containerPort: 5432
+      protocol: TCP
+    - containerPort: 8080
+      protocol: TCP
+    resources:
+      limits:
+        cpu: "1"
+        memory: 500Mi
+      requests:
+        cpu: 100m
+        memory: 100Mi
+    securityContext:
+      allowPrivilegeEscalation: true
+      privileged: false
+      readOnlyRootFilesystem: false
+    terminationMessagePath: /dev/termination-log
+    terminationMessagePolicy: File
+    volumeMounts:
+    - mountPath: /home/postgres/pgdata
+      name: pgdata
+    - mountPath: /dev/shm
+      name: dshm
+    - mountPath: /workspace
+      name: empty
+    - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+      name: kube-api-access-w9xs6
+      readOnly: true
+  dnsPolicy: ClusterFirst
+  enableServiceLinks: true
+  hostname: k8s-infra-0
+  initContainers:
+  - args:
+    - -c
+    - git clone --depth 1 https://github.com/kubernetes/k8s-infra
+    command:
+    - bash
+    image: bitnami/git
+    imagePullPolicy: Always
+    name: init-clone-k8s-infra
+    resources: {}
+    terminationMessagePath: /dev/termination-log
+    terminationMessagePolicy: File
+    volumeMounts:
+    - mountPath: /workspace
+      name: empty
+    - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+      name: kube-api-access-w9xs6
+      readOnly: true
+    workingDir: /workspace
+  nodeName: docker-desktop
+  preemptionPolicy: PreemptLowerPriority
+  priority: 0
+  restartPolicy: Always
+  schedulerName: default-scheduler
+  securityContext: {}
+  serviceAccount: postgres-pod
+  serviceAccountName: postgres-pod
+  subdomain: k8s-infra
+  terminationGracePeriodSeconds: 300
+  tolerations:
+  - effect: NoExecute
+    key: node.kubernetes.io/not-ready
+    operator: Exists
+    tolerationSeconds: 300
+  - effect: NoExecute
+    key: node.kubernetes.io/unreachable
+    operator: Exists
+    tolerationSeconds: 300
+  volumes:
+  - name: pgdata
+    persistentVolumeClaim:
+      claimName: pgdata-k8s-infra-0
+  - emptyDir:
+      medium: Memory
+    name: dshm
+  - emptyDir: {}
+    name: empty
+  - name: kube-api-access-w9xs6
+    projected:
+      defaultMode: 420
+      sources:
+      - serviceAccountToken:
+          expirationSeconds: 3607
+          path: token
+      - configMap:
+          items:
+          - key: ca.crt
+            path: ca.crt
+          name: kube-root-ca.crt
+      - downwardAPI:
+          items:
+          - fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.namespace
+            path: namespace
+status:
+  conditions:
+  - lastProbeTime: null
+    lastTransitionTime: "2022-03-26T22:23:23Z"
+    message: 'containers with incomplete status: [init-clone-k8s-infra]'
+    reason: ContainersNotInitialized
+    status: "False"
+    type: Initialized
+  - lastProbeTime: null
+    lastTransitionTime: "2022-03-26T22:23:23Z"
+    message: 'containers with unready status: [postgres]'
+    reason: ContainersNotReady
+    status: "False"
+    type: Ready
+  - lastProbeTime: null
+    lastTransitionTime: "2022-03-26T22:23:23Z"
+    message: 'containers with unready status: [postgres]'
+    reason: ContainersNotReady
+    status: "False"
+    type: ContainersReady
+  - lastProbeTime: null
+    lastTransitionTime: "2022-03-26T22:23:23Z"
+    status: "True"
+    type: PodScheduled
+  containerStatuses:
+  - image: registry.opensource.zalan.do/acid/spilo-14:2.1-p3
+    imageID: ""
+    lastState: {}
+    name: postgres
+    ready: false
+    restartCount: 0
+    started: false
+    state:
+      waiting:
+        reason: PodInitializing
+  hostIP: 192.168.65.4
+  initContainerStatuses:
+  - containerID: docker://c3efa1ce9e955a357d67369bd85c62cd2cf506e4e04d74751e688aa5b2327123
+    image: bitnami/git:latest
+    imageID: docker-pullable://bitnami/git@sha256:9c72aa2cf088597599a6116bdfe7f6864ed80004cc1acfd3e3bdf834e660e19c
+    lastState:
+      terminated:
+        containerID: docker://c3efa1ce9e955a357d67369bd85c62cd2cf506e4e04d74751e688aa5b2327123
+        exitCode: 128
+        finishedAt: "2022-03-26T22:24:22Z"
+        reason: Error
+        startedAt: "2022-03-26T22:24:21Z"
+    name: init-clone-k8s-infra
+    ready: false
+    restartCount: 3
+    state:
+      waiting:
+        message: back-off 40s restarting failed container=init-clone-k8s-infra pod=k8s-infra-0_default(0551cf02-9396-4da7-9755-0808f195d509)
+        reason: CrashLoopBackOff
+  phase: Pending
+  podIP: 10.1.0.73
+  podIPs:
+  - ip: 10.1.0.73
+  qosClass: Burstable
+  startTime: "2022-03-26T22:23:23Z"
+#+end_src
+
+#+begin_src shell
+kubectl get service k8s-infra
+#+end_src
+
+#+RESULTS:
+#+begin_example
+NAME        TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)    AGE
+k8s-infra   ClusterIP   10.109.11.112   <none>        5432/TCP   45s
+#+end_example
+
+#+begin_src shell
+kubectl get secrets --selector application=spilo
+#+end_src
+
+#+RESULTS:
+#+begin_example
+NAME                                                       TYPE     DATA   AGE
+ii.k8s-infra.credentials.postgresql.acid.zalan.do          Opaque   2      3m17s
+k8s-infra.k8s-infra.credentials.postgresql.acid.zalan.do   Opaque   2      3m17s
+postgres.k8s-infra.credentials.postgresql.acid.zalan.do    Opaque   2      3m17s
+standby.k8s-infra.credentials.postgresql.acid.zalan.do     Opaque   2      3m16s
+#+end_example
+
+#+begin_src shell
+kubectl get secret ii.k8s-infra.credentials.postgresql.acid.zalan.do -o yaml
+#+end_src
+
+#+RESULTS:
+#+begin_example
+apiVersion: v1
+data:
+  password: MVg4MDBqUGxERGE1V1UzbDdNcDgzRU1namYwZUM0R2w3bWVkNHhZSndUS2FsbGR4Y0Z2UThXQlNTeVl5ZjVNMQ==
+  username: aWk=
+kind: Secret
+metadata:
+  creationTimestamp: "2022-03-26T03:42:33Z"
+  labels:
+    application: spilo
+    cluster-name: k8s-infra
+    team: k8s
+  name: ii.k8s-infra.credentials.postgresql.acid.zalan.do
+  namespace: infrasnoop
+  resourceVersion: "6018"
+  uid: 4fb8a6f8-8f76-4f58-a9ed-7df884007626
+type: Opaque
+#+end_example
+
+* psql
+#+begin_src tmate :session psql :window psql
+export PGPASSWORD=$(kubectl get secret ii.acid-minimal-cluster.credentials -o 'jsonpath={.data.password}' | base64 -d)
+export PGSSLMODE=require
+#+end_src
+* service account
+#+begin_src shell
+#  ii-k8s-infra@ii-coop.iam.gserviceaccount.com
+kubectl delete secret generic ii-k8s-infra-sa-key || true
+kubectl create secret generic ii-k8s-infra-sa-key --from-file ii-service-account.json
+#+end_src
+
+#+RESULTS:
+#+begin_example
+secret/ii-k8s-infra-sa-key created
+#+end_example
+
+#+begin_src shell
+gcloud auth activate-service-account ii-k8s-infra@ii-coop.iam.gserviceaccount.com --key-file ii-coop-34066a7d42cc.json
+#+end_src
+* next steps
+#+begin_src shell
+bq query -q --nouse_cache --max_rows 99999999 --format prettyjson --nouse_legacy_sql "select job, path, number,started from k8s-gubernator.build.all where result = 'SUCCESS' qualify ROW_NUMBER() OVER(PARTITION BY job ORDER BY number desc) = 1;" > latest_successful_jobs.json
+#+end_src
+#+begin_src
+cat latest_successful_jobs.json | jq -r '.[] | .path + "/**"' | xargs -L 100 -P 16 gsutil  ls -la > job_logs.txt
+#+end_src

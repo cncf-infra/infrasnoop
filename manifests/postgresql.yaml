@@ -1,0 +1,116 @@
+apiVersion: "acid.zalan.do/v1"
+kind: postgresql
+metadata:
+  name: k8s-infra
+  namespace: infrasnoop
+spec:
+  teamId: "k8s"
+  volume:
+    size: 20Gi
+  numberOfInstances: 1
+  users:
+    # database owner
+    ii:
+    - superuser
+    - createdb
+
+    # role for application foo
+    k8s-infra: []
+    # or 'foo_user: []'
+
+  #databases: name->owner
+  databases:
+    k8s-infra: k8s-infra
+  postgresql:
+    version: "14"
+  additionalVolumes:
+    - name: "ii-k8s-infra-sa-key"
+      mountPath: /var/run/secret/cloud.google.com
+      volumeSource:
+        secret:
+          secretName: "ii-k8s-infra-sa-key"
+      targetContainers:
+        - init-dump-k8s-gubernator
+    - name: empty
+      mountPath: /workspace
+      volumeSource:
+        emptyDir: {}
+      targetContainers:
+        - init-clone-k8s-infra
+        - init-dump-k8s-gubernator
+        - init-dump-prowjobconfig
+        - postgres
+  enableShmVolume: true
+  initContainers:
+  - name: init-dump-k8s-gubernator
+    # this dumps the latest successful jobs from the gubernator BigQuery DB
+    image: openbridge/ob_google-bigquery
+    workingDir: /workspace
+    command:
+    - /bin/bash
+    - -c
+    - |
+      set -x
+      set -e
+      gcloud auth activate-service-account ii-k8s-infra@ii-coop.iam.gserviceaccount.com  --key-file $GOOGLE_APPLICATION_CREDENTIALS
+      gcloud config set project ii-coop
+      bq ls
+      bq query -q --nouse_cache --max_rows 99999999 --format prettyjson --nouse_legacy_sql \
+        "select job,path,number,started from k8s-gubernator.build.all where result = 'SUCCESS' qualify ROW_NUMBER() OVER(PARTITION BY job ORDER BY number desc) = 1;" \
+        > latest_successful_jobs.json
+      ls -la .
+    volumeMounts:
+      - name: empty
+        mountPath: /workspace
+      - name: "ii-k8s-infra-sa-key"
+        mountPath: "/var/run/secret/cloud.google.com"
+    env:
+      - name: "GOOGLE_APPLICATION_CREDENTIALS"
+        value: "/var/run/secret/cloud.google.com/ii-service-account.json"
+  - name: init-dump-job-results-gcs
+    # This iterates over the gcs paths from latest successful jobs
+    image: openbridge/ob_google-bigquery
+    workingDir: /workspace
+    command:
+    - /bin/bash
+    - -c
+    - |
+      set -x
+      set -e
+      gcloud auth activate-service-account ii-k8s-infra@ii-coop.iam.gserviceaccount.com  --key-file $GOOGLE_APPLICATION_CREDENTIALS
+      gsutil ls gs://kubernetes-jenkins/
+      cat latest_successful_jobs.json | jq -r '.[] | .path + "/**"' | xargs -L 100 -P 16 gsutil  ls -la > job_logs.txt
+      # TODO generating json would be nicer for import
+      # this list could be used to decide what to load into the DB
+      ls -la .
+    volumeMounts:
+      - name: empty
+        mountPath: /workspace
+      - name: "ii-k8s-infra-sa-key"
+        mountPath: "/var/run/secret/cloud.google.com"
+    env:
+      - name: "GOOGLE_APPLICATION_CREDENTIALS"
+        value: "/var/run/secret/cloud.google.com/ii-service-account.json"
+  - name: init-clone-k8s-infra
+    image: bitnami/git
+    workingDir: /workspace
+    command:
+    - bash
+    args:
+     - -c
+     - git clone --depth 1 https://github.com/kubernetes/test-infra.git
+    volumeMounts:
+      - mountPath: /workspace
+        name: empty
+  - name: init-dump-prowjobconfig
+    # This should run Caleb's main.go and result in a json file in /workspace/prow-job-config.json
+    image: bitnami/git
+    workingDir: /workspace/test-infra
+    command:
+    - bash
+    args:
+     - -c
+     - echo RUNME
+    volumeMounts:
+      - mountPath: /workspace
+        name: empty
