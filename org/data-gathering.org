@@ -1,0 +1,135 @@
+#+TITLE: Gathering Data for k8s-infra queries
+
+* Goal
+We want to be able to query the vast amount of data around prow jobs, so that we
+can make targeted, smart efforts to change them upon request.
+
+We have several data sources that we want to combine into a single postgres db
+for querying.
+
+This document outlines the steps needed to gather the data, along with the db schemas
+for our postgres db. The src blocks in this document can be lifted into a manifest for an
+eventual infrasnoop pod.
+* TODO Start up postgres DB
+For this early iteration, I'll just use postgres in a docker container
+
+#+NAME: Start up postgres on docker
+#+begin_src tmate :window docker
+docker run --rm --name infradb \
+    -e POSTGRES_PASSWORD=infradb \
+    -p 5432:5432 \
+    postgres:14-bullseye
+#+end_src
+
+
+This will start a db with the following credentials:
+- user :: postgres
+- db :: postgres
+- server :: localhost
+- password :: infradb
+
+With these, we should be able to connect to it through this org file.
+We should expect no relations, a clean db.
+
+#+NAME: connect to our db
+#+begin_src sql-mode
+\d
+#+end_src
+
+#+RESULTS: connect to our db
+#+begin_SRC example
+Did not find any relations.
+#+end_SRC
+
+* DONE Get authenticated for data fetching
+We will need to use bq and gsutil for half of the data fetching.
+#+begin_src shell
+bq version
+gsutil --version
+#+end_src
+
+#+RESULTS:
+#+begin_example
+This is BigQuery CLI 2.0.74
+gsutil version: 5.8
+#+end_example
+
+I have an ii service account that i am using to authenticate, by passing gsutil my keyfile.json
+
+#+begin_example sh
+gcloud auth activate-service-account --key-file ii-service-account.json
+#+end_example
+
+Then set up the right project and initialize bq
+
+#+begin_src shell
+gcloud config set project ii-coop
+bq ls
+#+end_src
+#+RESULTS:
+#+begin_src sh
+
+Welcome to BigQuery! This script will walk you through the
+process of initializing your .bigqueryrc configuration file.
+
+First, we need to set up your credentials if they do not
+already exist.
+
+Setting project_id ii-coop as the default.
+
+BigQuery configuration complete! Type "bq" to get started.
+
+#+end_src
+
+If this worked, I should be able to run a bq query on some public data
+
+#+begin_src sh
+bq query -q --nouse_cache --format prettyjson --nouse_legacy_sql \
+    "select job from k8s-gubernator.build.all where result = 'SUCCESS' limit 3;"
+#+end_src
+
+#+RESULTS:
+#+begin_src sh
+[
+  {
+    "job": "ci-npd-test"
+  },
+  {
+    "job": "ci-npd-test"
+  },
+  {
+    "job": "ci-npd-test"
+  }
+]
+#+end_src
+
+Fantastic! We are good to go.
+* The Plan
+Our design for this is to get all the data we need into json loaded to the same directory, then copy the json into the right table in the db.  For our
+pod this will be a number of init jobs that are run, outputting their results into a shared /workspace volume for our postgres init job to consume and populate the db.
+
+For now, I can put them all into a tmp workspace directory
+
+#+begin_src sh
+mkdir ~/tmp/workspace
+tree ~/tmp/workspace
+#+end_src
+
+#+RESULTS:
+#+begin_src sh
+/Users/workzach/tmp/workspace
+
+0 directories, 0 files
+#+end_src
+
+* TODO Get the latest successful jobs
+** Fetch Data
+
+** Load into postgres
+* TODO Get information about prow configs
+** Fetch Data
+** Load into postgres
+* TODO Get job paths and sizes
+** Fetch Data
+** Load into postgres
+* TODO Query combined data
