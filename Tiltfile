@@ -23,7 +23,7 @@ sa_key_installed = str(local('kubectl get secret | grep ii-k8s-infra-sa-key | wc
 if sa_key_installed == '0':
   local('kubectl -n infrasnoop create secret generic ii-k8s-infra-sa-key --from-file ii-service-account.json')
 
-k8s_yaml('postgresql.yaml')
+k8s_yaml('./manifests/postgresql.yaml')
 # k8s_resource(new_name='postgres',
 #              objects=['quick-postgres'],
 #              extra_pod_selectors=[{'kubedb.com/name': 'quick-postgres'}],

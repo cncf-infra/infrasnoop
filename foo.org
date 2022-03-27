@@ -22,3 +22,20 @@ select 1;
 #+begin_src bq
 select 1 ;
 #+end_src
+* research
+#+begin_src shell
+kubectl get pods -A
+#+end_src
+
+#+RESULTS:
+| NAMESPACE   | NAME                                   | READY | STATUS  | RESTARTS | AGE  |      |     |
+| default     | postgres-operator-569b58b8c6-6qf99     | 1/1   | Running |        2 | (22s | ago) | 24m |
+| kube-system | coredns-78fcd69978-nqk7j               | 1/1   | Running |        1 | (54m | ago) | 75m |
+| kube-system | coredns-78fcd69978-z5dmf               | 1/1   | Running |        1 | (54m | ago) | 75m |
+| kube-system | etcd-docker-desktop                    | 1/1   | Running |        1 | (54m | ago) | 75m |
+| kube-system | kube-apiserver-docker-desktop          | 1/1   | Running |        1 | (54m | ago) | 75m |
+| kube-system | kube-controller-manager-docker-desktop | 1/1   | Running |        1 | (54m | ago) | 75m |
+| kube-system | kube-proxy-6f6hx                       | 1/1   | Running |        1 | (54m | ago) | 75m |
+| kube-system | kube-scheduler-docker-desktop          | 1/1   | Running |        1 | (54m | ago) | 75m |
+| kube-system | storage-provisioner                    | 1/1   | Running |        1 | (54m | ago) | 75m |
+| kube-system | vpnkit-controller                      | 1/1   | Running |        7 | (45s | ago) | 75m |
