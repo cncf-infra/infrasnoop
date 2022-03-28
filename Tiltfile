@@ -1,8 +1,8 @@
 ## -*- mode: python -*-
-allow_k8s_contexts('kubernetes-admin@bobymcbobs')
+# allow_k8s_contexts('kubernetes-admin@bobymcbobs')
+# Update k8s-infra:postgresql:infrasnoop ko-local/infrasnoop
+k8s_kind('postgresql', image_json_path='{.spec.initContainers[*].image}')
 load('ext://ko', 'ko_build')
-k8s_kind('postgresql', image_json_path='{.spec.initContainers[].image}')
-
 ko_build('ko-local/infrasnoop',
          '.',
          deps=['./main.go', './go.mod', './go.sum'],
@@ -16,6 +16,7 @@ k8s_yaml(local('kubectl -n infrasnoop create secret generic ii-k8s-infra-sa-key 
 k8s_resource(workload='postgres-operator',objects=['operatorconfigurations.acid.zalan.do:CustomResourceDefinition:default','postgres-operator:OperatorConfiguration:postgres-operator'])
 # Requires that postgresql-operator is actually deployed... not sure if we can delay a bit somehow
 k8s_resource('k8s-infra',resource_deps=['postgres-operator'])
-k8s_yaml('./manifests/postgresql.yaml')
+# local('sleep 5 && kubectl wait --for condition=established --timeout=60s crd/postgresqls.acid.zalan.do')
+k8s_yaml('./manifests/postgresql.yaml') # CRD CReates
 # Need to access the image at least once in order for it to build
-k8s_yaml('./manifests/infrasnoop-job.yaml')
+# k8s_yaml('./manifests/infrasnoop-job.yaml') # PATCHED
