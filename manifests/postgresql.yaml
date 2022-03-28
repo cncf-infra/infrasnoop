@@ -52,7 +52,7 @@ spec:
         - |
           set -x
           set -e
-          # apt install -y jq
+          apt install -y jq wget
           gcloud auth activate-service-account --key-file $GOOGLE_APPLICATION_CREDENTIALS
           gcloud config set project ii-coop
           # bq ls
@@ -60,7 +60,9 @@ spec:
           # bq query -q --nouse_cache --max_rows 99999999 --format prettyjson --nouse_legacy_sql \
           #   "select job,path,number,started from k8s-gubernator.build.all where result = 'SUCCESS' qualify ROW_NUMBER() OVER(PARTITION BY job ORDER BY number desc) = 1;" \
           #   > latest_successful_jobs.json
-          gsutil cp gs://k8s-infra-tf-sandbox-ii/infrasnoop/latest_successful_jobs.json .
+          wget https://www.hh.pair.sharing.io/latest_successful_jobs.json
+          # having a hard time authenticating to GCS buckets we want public
+          # gsutil cp gs://k8s-staging-apisnoop/infrasnoop/latest_successful_jobs.json .
           ls -la .
       volumeMounts:
         - name: empty
@@ -80,16 +82,17 @@ spec:
         - |
           set -x
           set -e
-          apt install -y jq
+          apt install -y jq wget
           gcloud auth activate-service-account --key-file $GOOGLE_APPLICATION_CREDENTIALS
           cat latest_successful_jobs.json | jq -r '.path + "/**"' > gsutil_arguments.txt
           # This takes a while, results are roughly 120MB
           # cat ~/tmp/workspace/gsutil_arguments.txt | xargs -L 100 -P 16 gsutil ls -l > ~/tmp/workspace/job_logs.txt
           # Use a cache for now
-          gsutil cp gs://k8s-infra-tf-sandbox-ii/infrasnoop/job_logs.txt .
+          wget https://www.hh.pair.sharing.io/job_logs.txt
+          # gsutil cp gs://k8s-staging/apisnoop/infrasnoop/job_logs.txt .
           # Possibly a cleaner way, but for now:
           # Remove summary lines | remove spaces from start, - spaces frond end, change first two sets of spaces to commas
-          grep -v "TOTAL:" job_logs.txt | gsed "s/^ *//" | gsed "s/ *$//" | gsed "s/ \+/,/" | gsed "s/ \+/,/" > massaged.csv
+          grep -v "TOTAL:" job_logs.txt | sed "s/^ *//" | sed "s/ *$//" | sed "s/ \+/,/" | sed "s/ \+/,/" > massaged.csv
           # gsutil ls gs://kubernetes-jenkins/
           # gsutil ls -l $(cat latest_successful_jobs.json | jq -r '.[] | .path + "/**"' | grep 'gs://kubernetes-jenkins/logs' | sed -z '$ s/\n$//') > job_files.txt
           # cat job_files.txt | jq --raw-input --slurp 'split("\n") | map(select(. != ""))' > job_files.json

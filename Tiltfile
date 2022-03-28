@@ -15,6 +15,7 @@ k8s_yaml(local('helm template postgres-operator -n postgres-operator https://raw
 k8s_yaml(local('kubectl -n infrasnoop create secret generic ii-k8s-infra-sa-key --from-file ii-service-account.json --dry-run=client -o yaml'))
 k8s_resource(workload='postgres-operator',objects=['operatorconfigurations.acid.zalan.do:CustomResourceDefinition:default','postgres-operator:OperatorConfiguration:postgres-operator'])
 # Requires that postgresql-operator is actually deployed... not sure if we can delay a bit somehow
+k8s_resource('k8s-infra',resource_deps=['postgres-operator'])
 k8s_yaml('./manifests/postgresql.yaml')
-# Need to run the pod once
-k8s_yaml('./manifests/pod.yaml')
+# Need to access the image at least once in order for it to build
+k8s_yaml('./manifests/infrasnoop-job.yaml')

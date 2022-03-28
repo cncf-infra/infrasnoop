@@ -1,0 +1,19 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: infrasnoop
+  namespace: infrasnoop
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - image: ko-local/infrasnoop
+          imagePullPolicy: IfNotPresent
+          name: infrasnoop
+          volumeMounts:
+          - name: empty
+            mountPath: /tmp/src-test-infra/config/jobs
+      volumes:
+      - name: empty
+        emptyDir: {}
