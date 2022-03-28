@@ -31,7 +31,7 @@ func WriteJobAsJSONFile(j interface{}) error {
 	if err != nil {
 		return fmt.Errorf("Error marshalling json data, %v", err)
 	}
-	fileToWrite := "/tmp/infrasnoop-jobs.json"
+	fileToWrite := runtimeConfig.Output
 	f, err := os.OpenFile(fileToWrite, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0777)
 	if err != nil {
 		return fmt.Errorf("Error open new json data (%v), %v", fileToWrite, err)
@@ -102,13 +102,15 @@ func GetAFile(url string) (body string, err error) {
 }
 
 type Config struct {
-	Reset bool
-	Path  string
+	Reset  bool
+	Path   string
+	Output string
 }
 
 func init() {
 	flag.BoolVar(&runtimeConfig.Reset, "reset", false, "resets the database")
 	flag.StringVar(&runtimeConfig.Path, "path", "/tmp/src-test-infra/config/jobs", "the path to the ProwJobs")
+	flag.StringVar(&runtimeConfig.Output, "output", "/tmp/infrasnoop-jobs.json", "the path of where to write the infrasnoop-jobs.json file")
 	flag.Parse()
 }
 
