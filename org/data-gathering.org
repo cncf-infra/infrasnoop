@@ -287,7 +287,7 @@ We want to find jobs whose output contains images-containerd.log...with the end 
 
 First, let's see if we can filter on this output
 #+begin_src sql-mode
-    select distinct path
+    select count(distinct path)
     from job_gcs_output
     where path like '%images-containerd.log'
     limit 5;
@@ -295,14 +295,10 @@ First, let's see if we can filter on this output
 
 #+RESULTS:
 #+begin_SRC example
-                                                                        path
-----------------------------------------------------------------------------------------------------------------------------------------------------
- gs://kubernetes-jenkins/logs/ci-benchmark-kube-dns-master/1508162223090962432/artifacts/kube-dns-benchmark-master/images-containerd.log
- gs://kubernetes-jenkins/logs/ci-benchmark-kube-dns-master/1508162223090962432/artifacts/kube-dns-benchmark-minion-group-f1r0/images-containerd.log
- gs://kubernetes-jenkins/logs/ci-benchmark-kube-dns-master/1508162223090962432/artifacts/kube-dns-benchmark-minion-group-j6j5/images-containerd.log
- gs://kubernetes-jenkins/logs/ci-benchmark-kube-dns-master/1508162223090962432/artifacts/kube-dns-benchmark-minion-group-t27n/images-containerd.log
- gs://kubernetes-jenkins/logs/ci-benchmark-nodelocal-dns-master/1508163232001429504/artifacts/node-local-dns-benchmark-master/images-containerd.log
-(5 rows)
+ count
+-------
+   351
+(1 row)
 
 #+end_SRC
 
@@ -310,7 +306,7 @@ Great, now we want to combine this with our successful jobs, to get the job name
 
 
 #+begin_src sql-mode
-select s.job, s.started, j.time
+select s.job, j.path
 from
 job_gcs_output j
 join successful_jobs s on j.path like '%'||s.path||'%'
@@ -320,13 +316,13 @@ limit 5;
 
 #+RESULTS:
 #+begin_SRC example
-                 job                  |       started       |        time
---------------------------------------+---------------------+---------------------
- ci-cos-containerd-e2e-ubuntu-gce     | 2022-03-27 19:20:14 | 2022-03-27 19:58:02
- ci-cos-containerd-e2e-ubuntu-gce     | 2022-03-27 19:20:14 | 2022-03-27 19:58:05
- ci-cos-containerd-e2e-ubuntu-gce     | 2022-03-27 19:20:14 | 2022-03-27 19:58:02
- ci-cos-containerd-e2e-ubuntu-gce     | 2022-03-27 19:20:14 | 2022-03-27 19:58:05
- ci-cri-containerd-e2e-cos-gce-serial | 2022-03-27 11:42:14 | 2022-03-27 16:31:18
+                    job                    |                                                                        path
+-------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------
+ ci-kubernetes-e2e-gce-coredns-performance | gs://kubernetes-jenkins/logs/ci-kubernetes-e2e-gce-coredns-performance/1508096287960993792/artifacts/gce-coredns-perf-master/images-containerd.log
+ ci-kubernetes-e2e-gci-gce-sig-cli         | gs://kubernetes-jenkins/logs/ci-kubernetes-e2e-gci-gce-sig-cli/1508074141863907328/artifacts/bootstrap-e2e-master/images-containerd.log
+ ci-kubernetes-e2e-gci-gce-sig-cli         | gs://kubernetes-jenkins/logs/ci-kubernetes-e2e-gci-gce-sig-cli/1508074141863907328/artifacts/bootstrap-e2e-minion-group-2ppq/images-containerd.log
+ ci-kubernetes-e2e-gci-gce-sig-cli         | gs://kubernetes-jenkins/logs/ci-kubernetes-e2e-gci-gce-sig-cli/1508074141863907328/artifacts/bootstrap-e2e-minion-group-cjx3/images-containerd.log
+ ci-kubernetes-e2e-gci-gce-sig-cli         | gs://kubernetes-jenkins/logs/ci-kubernetes-e2e-gci-gce-sig-cli/1508074141863907328/artifacts/bootstrap-e2e-minion-group-m53c/images-containerd.log
 (5 rows)
 
 #+end_SRC
@@ -335,3 +331,29 @@ There seems to be multiple entries for each of these, as there are multiple arti
 
 What we want to do now is, for each of these rows, fetch the log to put into a log table, where we can parse through the json as needed.
 ** function: load containerd.json for job
+We want to loop over our resulting files, fetch them from gcsweb.k8s.io and insert them into a files table.
+that files table can have the job, the path, the started (for the job), the filename,
+#+begin_src sql-mode
+create table file(
+filename text,
+job text, --references successful_jobs(job),
+started timestamp, --references successful_jobs(started),
+path text, --references job_gcs_output(path),
+text_content text,
+json jsonb
+);
+#+end_src
+
+
+I believe next we can loop over a select statemetn and for each row...do stuff.
+
+We will need to add a siongle if then, if the filename ends in json, put it in
+json column, else put it in text column.
+
+I think we will want to clean up the initial tables a bit, to have contraints on
+the relations between tables, so that we don't have any duplication.
+
+I think the ultimate signature would be
+
+upsert_files('filename.json')
+and it will select for all the files that match, then curl it down, and upsert it into table.
