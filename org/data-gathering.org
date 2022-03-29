@@ -436,3 +436,13 @@ postgres=*# postgres=*# postgres(*#                                             
 
 postgres=*# ROLLBACK
 #+end_SRC
+* misc
+* Reconfigure ORG with k8s-cluster PGUSER+PGPASSWORD
+
+Run this after you deploy
+
+#+begin_src emacs-lisp :noweb yes :results silent
+(setenv "PGUSER" (shell-command-to-string "kubectl -n infrasnoop get secrets k8s-infra.k8s-infra.credentials.postgresql.acid.zalan.do -o go-template='{{ .data.username | base64decode }}'"))
+(setenv "PGPASSWORD" (shell-command-to-string "kubectl -n infrasnoop get secrets k8s-infra.k8s-infra.credentials.postgresql.acid.zalan.do -o go-template='{{ .data.password | base64decode }}'"))
+(reconfigure-org)
+#+end_src

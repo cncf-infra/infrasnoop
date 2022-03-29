@@ -1,5 +1,5 @@
 ## -*- mode: python -*-
-# allow_k8s_contexts('kubernetes-admin@bobymcbobs')
+allow_k8s_contexts('kubernetes-admin@'+os.environ['SHARINGIO_PAIR_NAME'])
 # Update k8s-infra:postgresql:infrasnoop ko-local/infrasnoop
 k8s_kind('postgresql', image_json_path='{.spec.initContainers[*].image}')
 load('ext://ko', 'ko_build')
