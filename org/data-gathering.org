@@ -154,13 +154,23 @@ head -3 ~/tmp/workspace/latest_successful_jobs.json
 I think it is best to make separate tables for each of our raw
 data, and then combine them into a view.
 
+#+begin_src sql-mode
+drop table successful_jobs;
+#+end_src
+
+#+RESULTS:
+#+begin_SRC example
+DROP TABLE
+#+end_SRC
+
 #+NAME: Schema for latest successful jobs
 #+begin_src sql-mode
 create table successful_jobs(
 job text,
 path text,
 number text,
-started timestamp
+started timestamp,
+primary key (job, path)
 );
 #+end_src
 
@@ -197,28 +207,22 @@ postgres=*# postgres=*# COMMIT
 Now we can query the jobs by timestamp, like the last
 10 jobs that ran in the last 12 hours, ordered by earliest
 #+begin_src sql-mode
-select now() as now, job, number, started
+select job, path, started
 from successful_jobs
-where started >= current_timestamp - interval '12 hours'
+where number is null
 order by started asc
 limit 10;
 #+end_src
 
 #+RESULTS:
 #+begin_SRC example
-              now              |                              job                              |       number        |       started
--------------------------------+---------------------------------------------------------------+---------------------+---------------------
- 2022-03-27 21:47:17.089326+00 | periodic-cluster-api-provider-vsphere-upgrade-main            | 1508019280833155072 | 2022-03-27 09:53:16
- 2022-03-27 21:47:17.089326+00 | e2e-kops-grid-cilium-u2004-k23-docker                         | 1508019280891875328 | 2022-03-27 09:53:45
- 2022-03-27 21:47:17.089326+00 | periodic-cluster-api-e2e-workload-upgrade-1-21-1-22-main      | 1508020286358818816 | 2022-03-27 09:59:07
- 2022-03-27 21:47:17.089326+00 | e2e-kops-grid-cilium-u2004-k22-containerd                     | 1508021544805208064 | 2022-03-27 10:02:48
- 2022-03-27 21:47:17.089326+00 | ci-kubernetes-e2e-gce-network-metric-measurement              | 1508024564645367808 | 2022-03-27 10:14:12
- 2022-03-27 21:47:17.089326+00 | e2e-kops-grid-cilium-etcd-u2004-k22-docker                    | 1508025320211484672 | 2022-03-27 10:17:08
- 2022-03-27 21:47:17.089326+00 | ci-cos-cgroupv2-containerd-node-e2e                           | 1508030856273334272 | 2022-03-27 10:39:12
- 2022-03-27 21:47:17.089326+00 | periodic-cluster-api-provider-digitalocean-janitor            | 1508030856193642496 | 2022-03-27 10:39:15
- 2022-03-27 21:47:17.089326+00 | periodic-cluster-api-provider-aws-e2e-conformance-release-0-7 | 1508030856164282368 | 2022-03-27 10:39:17
- 2022-03-27 21:47:17.089326+00 | ci-kubernetes-e2e-kubeadm-kinder-external-etcd-1-23           | 1508031863669657600 | 2022-03-27 10:45:11
-(10 rows)
+                               job                               |                                                               path                                                               |       started
+-----------------------------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------+---------------------
+ pull-kubernetes-verify                                          | gs://kubernetes-jenkins/logs/pull-kubernetes-verify/20161016-0756271e80eef7b01f7529-3685                                         | 2016-10-16 07:56:27
+ ci-kubernetes-e2e-gce-ubuntu-node-prow                          | gs://kubernetes-jenkins/logs/ci-kubernetes-e2e-gce-ubuntu-node-prow/20170802-211931--116b094ba9c718b6-7                          | 2017-08-02 21:19:31
+ ci-kubernetes-e2enode-cosstable1-k8sstable1-default-defaultspec | gs://kubernetes-jenkins/logs/ci-kubernetes-e2enode-cosstable1-k8sstable1-default-defaultspec/20170807-204445--18a650865f3197bb-7 | 2017-08-07 20:44:45
+ pr:632                                                          | gs://kubernetes-jenkins/pr-logs/pull/kubeflow_testing/632/kubeflow-testing-presubmit                                             | 2020-03-26 00:48:29
+(4 rows)
 
 #+end_SRC
 
@@ -241,19 +245,13 @@ cat job_logs.txt | grep -v "TOTAL:" | gsed "s/^ *//" | gsed "s/ *$//" | gsed "s/
 
 This gets us a massaged.csv of size,time,path that we load into our db.
 ** Load into postgres
-#+begin_src sh :dir ~/tmp/workspace
-#+end_src
-
-#+RESULTS:
-#+begin_src sh
-#+end_src
 
 #+begin_src sql-mode
 begin;
 create table job_gcs_output(
 size bigint,
 time timestamp,
-path text
+path text primary key
 );
 
 create temporary table job_import(size text, time text, path text);
@@ -287,7 +285,7 @@ We want to find jobs whose output contains images-containerd.log...with the end 
 
 First, let's see if we can filter on this output
 #+begin_src sql-mode
-    select distinct path
+    select count(distinct path)
     from job_gcs_output
     where path like '%images-containerd.log'
     limit 5;
@@ -295,14 +293,10 @@ First, let's see if we can filter on this output
 
 #+RESULTS:
 #+begin_SRC example
-                                                                        path
-----------------------------------------------------------------------------------------------------------------------------------------------------
- gs://kubernetes-jenkins/logs/ci-benchmark-kube-dns-master/1508162223090962432/artifacts/kube-dns-benchmark-master/images-containerd.log
- gs://kubernetes-jenkins/logs/ci-benchmark-kube-dns-master/1508162223090962432/artifacts/kube-dns-benchmark-minion-group-f1r0/images-containerd.log
- gs://kubernetes-jenkins/logs/ci-benchmark-kube-dns-master/1508162223090962432/artifacts/kube-dns-benchmark-minion-group-j6j5/images-containerd.log
- gs://kubernetes-jenkins/logs/ci-benchmark-kube-dns-master/1508162223090962432/artifacts/kube-dns-benchmark-minion-group-t27n/images-containerd.log
- gs://kubernetes-jenkins/logs/ci-benchmark-nodelocal-dns-master/1508163232001429504/artifacts/node-local-dns-benchmark-master/images-containerd.log
-(5 rows)
+ count
+-------
+   351
+(1 row)
 
 #+end_SRC
 
@@ -310,7 +304,7 @@ Great, now we want to combine this with our successful jobs, to get the job name
 
 
 #+begin_src sql-mode
-select s.job, s.started, j.time
+select s.job, j.path
 from
 job_gcs_output j
 join successful_jobs s on j.path like '%'||s.path||'%'
@@ -320,13 +314,13 @@ limit 5;
 
 #+RESULTS:
 #+begin_SRC example
-                 job                  |       started       |        time
---------------------------------------+---------------------+---------------------
- ci-cos-containerd-e2e-ubuntu-gce     | 2022-03-27 19:20:14 | 2022-03-27 19:58:02
- ci-cos-containerd-e2e-ubuntu-gce     | 2022-03-27 19:20:14 | 2022-03-27 19:58:05
- ci-cos-containerd-e2e-ubuntu-gce     | 2022-03-27 19:20:14 | 2022-03-27 19:58:02
- ci-cos-containerd-e2e-ubuntu-gce     | 2022-03-27 19:20:14 | 2022-03-27 19:58:05
- ci-cri-containerd-e2e-cos-gce-serial | 2022-03-27 11:42:14 | 2022-03-27 16:31:18
+                  job                  |                                                                          path
+---------------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------
+ ci-cri-containerd-e2e-cos-gce-ingress | gs://kubernetes-jenkins/logs/ci-cri-containerd-e2e-cos-gce-ingress/1508137308472217600/artifacts/bootstrap-e2e-master/images-containerd.log
+ ci-cri-containerd-e2e-cos-gce-ingress | gs://kubernetes-jenkins/logs/ci-cri-containerd-e2e-cos-gce-ingress/1508137308472217600/artifacts/bootstrap-e2e-minion-group-jcm7/images-containerd.log
+ ci-cri-containerd-e2e-cos-gce-ingress | gs://kubernetes-jenkins/logs/ci-cri-containerd-e2e-cos-gce-ingress/1508137308472217600/artifacts/bootstrap-e2e-minion-group-p8cd/images-containerd.log
+ ci-cri-containerd-e2e-cos-gce-ingress | gs://kubernetes-jenkins/logs/ci-cri-containerd-e2e-cos-gce-ingress/1508137308472217600/artifacts/bootstrap-e2e-minion-group-tq61/images-containerd.log
+ pr:pull-kubernetes-e2e-gci-gce-ipvs   | gs://kubernetes-jenkins/pr-logs/pull/109060/pull-kubernetes-e2e-gci-gce-ipvs/1508131198545694720/artifacts/bootstrap-e2e-master/images-containerd.log
 (5 rows)
 
 #+end_SRC
@@ -335,3 +329,110 @@ There seems to be multiple entries for each of these, as there are multiple arti
 
 What we want to do now is, for each of these rows, fetch the log to put into a log table, where we can parse through the json as needed.
 ** function: load containerd.json for job
+We want to loop over our resulting files, fetch them from gcsweb.k8s.io and insert them into a files table.
+that files table can have the job, the path, the started (for the job), the filename,
+#+begin_src sql-mode
+    begin;
+create table file(
+filename text,
+job text, --references successful_jobs(job),
+started timestamp, --references successful_jobs(started),
+path text references job_gcs_output(path), --references job_gcs_output(path),
+text_content text,
+json jsonb
+);
+commit;
+#+end_src
+
+#+RESULTS:
+#+begin_SRC example
+BEGIN
+postgres=*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# CREATE TABLE
+postgres=*# COMMIT
+#+end_SRC
+
+* Initial function
+given a path, construct a publ;ic link from it, then return the value.
+
+#+NAME: initial function
+#+begin_src sql-mode
+begin;
+
+create function fetch_file(filepath text) returns text
+as $$
+    import urllib.request
+
+    public_prefix = 'https://gcsweb.k8s.io/gcs/';
+    path = filepath.replace("gs://","")
+    link = public_prefix + path
+    file = ""
+
+    with urllib.request.urlopen(link) as response:
+     file = response.read()
+    return file
+    end;
+$$ language plpython3u;
+
+commit;
+#+end_src
+
+#+RESULTS: initial function
+#+begin_SRC example
+BEGIN
+postgres=*# postgres=*# postgres-*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# CREATE FUNCTION
+postgres=*# postgres=*# COMMIT
+#+end_SRC
+
+With the fetch file, we can build out another function that inserts into our file table
+
+#+begin_src sql-mode
+begin;
+create function insert_file(filename text, filepath text) returns text
+as $$
+  declare
+  p text;
+begin
+  -- insert into file(filename, job, started, path)
+
+  -- select filename,
+  --        s.job,
+  --        s.started,
+  --        j.path
+  --   from job_gcs_output j
+  --        join successful_jobs s on (j.path like '%'||s.path||'%')
+  --  where j.path = filepath;
+
+  -- blob = fetch_file(f)
+
+  -- if f like '%.json' then
+  --   update file
+  --   set json = to_json(blob)
+  --   where file.path
+  -- else
+  --   update
+
+  select filepath into p;
+   --  from job_gcs_output j
+   -- where j.path = filepath
+   -- limit 1;
+  return p;
+end;
+$$
+language plpgsql;
+
+select * from insert_file('images-containerd.log',
+                          ' gs://kubernetes-jenkins/logs/ci-kubernetes-e2e-gce-coredns-performance/1508096287960993792/artifacts/gce-coredns-perf-master/images-containerd.log');
+rollback;
+#+end_src
+
+#+RESULTS:
+#+begin_SRC example
+BEGIN
+postgres=*# postgres-*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres-*# CREATE FUNCTION
+postgres=*# postgres=*# postgres(*#                                                                      insert_file
+------------------------------------------------------------------------------------------------------------------------------------------------------
+  gs://kubernetes-jenkins/logs/ci-kubernetes-e2e-gce-coredns-performance/1508096287960993792/artifacts/gce-coredns-perf-master/images-containerd.log
+(1 row)
+
+postgres=*# ROLLBACK
+#+end_SRC
