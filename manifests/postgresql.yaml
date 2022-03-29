@@ -1,11 +1,11 @@
 apiVersion: v1
 kind: Secret
 metadata:
-  name: k8s-infra.k8s-infra.credentials.postgresql.acid.zalan.do
+  name: infrasnoop.k8s-infra.credentials.postgresql.acid.zalan.do
   namespace: infrasnoop
 stringData:
-  username: k8s-infra
-  password: k8s-infra
+  username: infrasnoop
+  password: infrasnoop
 ---
 apiVersion: "acid.zalan.do/v1"
 kind: postgresql
@@ -13,33 +13,29 @@ metadata:
   name: k8s-infra
   namespace: infrasnoop
 spec:
-  enableConnectionPooler: true
-  connectionPooler:
-    mode: session
-    resources:
-      requests:
-        cpu: 250m
-        memory: 100Mi
-      limits:
-        cpu: "1"
-        memory: 100Mi
+  # enableConnectionPooler: true
+  # connectionPooler:
+  #   mode: session
+  #   resources:
+  #     requests:
+  #       cpu: 250m
+  #       memory: 100Mi
+  #     limits:
+  #       cpu: "1"
+  #       memory: 100Mi
   teamId: "k8s"
   volume:
     size: 20Gi
   numberOfInstances: 1
   users:
     # database owner
-    ii:
+    infrasnoop:
       - superuser
       - createdb
 
-    # role for application foo
-    k8s-infra: []
-    # or 'foo_user: []'
-
   #databases: name->owner
   databases:
-    k8s-infra: k8s-infra
+    infrasnoop: infrasnoop
   postgresql:
     version: "14"
   additionalVolumes:
@@ -55,10 +51,11 @@ spec:
       volumeSource:
         emptyDir: {}
       targetContainers:
-        - init-clone-k8s-infra
-        - init-dump-k8s-gubernator
-        - init-dump-prowjobconfig
-        - postgres
+        - all
+        # - init-clone-k8s-infra
+        # - init-dump-k8s-gubernator
+        # - init-dump-prowjobconfig
+        # - postgres
   enableShmVolume: true
   initContainers:
     - name: init-clone-k8s-infra

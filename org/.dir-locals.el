@@ -21,7 +21,7 @@
            (if (getenv "PGHOST")
                (getenv "PGHOST")
              (if (file-exists-p "/var/run/secrets/kubernetes.io/serviceaccount/namespace")
-                 "k8s-infra-pooler.infrasnoop"
+                 "k8s-infra.infrasnoop"
                "localhost"
                )))
       (set (make-local-variable 'sql-port)
@@ -31,15 +31,15 @@
       (set (make-local-variable 'sql-user)
            (if (getenv "PGUSER")
                (getenv "PGUSER")
-             "k8s-infra"))
+             "infrasnoop"))
       (set (make-local-variable 'sql-database)
            (if (getenv "PGDATABASE")
                (getenv "PGDATABASE")
-             "k8s-infra"))
+             "infrasnoop"))
       (set (make-local-variable 'sql-password)
            (if (getenv "PGPASSWORD")
                (getenv "PGPASSWORD")
-             "k8s-infra"))
+             "infrasnoop"))
       (set (make-local-variable 'sql-product)
            '(quote postgres))
       (set (make-local-variable 'sql-connection-alist)
