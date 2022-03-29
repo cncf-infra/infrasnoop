@@ -36,6 +36,10 @@
            (if (getenv "PGDATABASE")
                (getenv "PGDATABASE")
              "k8s-infra"))
+      (set (make-local-variable 'sql-password)
+           (if (getenv "PGPASSWORD")
+               (getenv "PGPASSWORD")
+             "k8s-infra"))
       (set (make-local-variable 'sql-product)
            '(quote postgres))
       (set (make-local-variable 'sql-connection-alist)
@@ -46,8 +50,7 @@
                   (list 'sql-product '(quote postgres))
                   (list 'sql-database (concat "postgresql://"
                                           sql-user
-                                          (if (getenv "PGPASSWORD")
-                                              (concat ":" (getenv "PGPASSWORD")))
+                                          ":" sql-password
                                           "@" sql-server
                                           ":" (number-to-string sql-port)
                                           "/" sql-database ;; replace with your database
