@@ -1,4 +1,17 @@
 #+TITLE: ii
+
+* Reconfigure ORG with k8s-cluster PGUSER+PGPASSWORD
+#+begin_src emacs-lisp :noweb yes :results silent
+(setenv "PGUSER" (shell-command-to-string "kubectl -n infrasnoop get secrets k8s-infra.k8s-infra.credentials.postgresql.acid.zalan.do -o go-template='{{ .data.username | base64decode }}'"))
+(setenv "PGPASSWORD" (shell-command-to-string "kubectl -n infrasnoop get secrets k8s-infra.k8s-infra.credentials.postgresql.acid.zalan.do -o go-template='{{ .data.password | base64decode }}'"))
+(reconfigure-org)
+#+end_src
+
+
+#+begin_src sql-mode
+select 1;
+#+end_src
+
 * namespace
 #+begin_src shell :results none
 kubectl create ns infrasnoop || true
