@@ -54,6 +54,7 @@
                                           "@" sql-server
                                           ":" (number-to-string sql-port)
                                           "/" sql-database ;; replace with your database
+                                          "?ssmode=require"
                                           )))))
       )
       (reconfigure-org)
