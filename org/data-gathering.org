@@ -7,18 +7,49 @@ can make targeted, smart efforts to change them upon request.
 We have several data sources that we want to combine into a single postgres db
 for querying.
 
-This document outlines the steps needed to gather the data, along with the db schemas
-for our postgres db. The src blocks in this document can be lifted into a manifest for an
-eventual infrasnoop pod.
-* TODO Start up postgres DB
-For this early iteration, I'll just use postgres in a docker container
+This document outlines the steps needed to gather the data, along with the db
+schemas for our postgres db. Eventually, the sql src in here will be lifted into
+a manifest for a cluster pod. For now, it is recommended to run the src blocks
+to create the files necessary, to be able to review whether the work is ready to be
+converted into a job.
 
-#+NAME: Start up postgres on docker
+* Our database and workspace dir
+We will be using a postgrest:14 database with the plpython3u extension. In the cluster-job
+we are building for it, plpython3u is already included.  For this review, we will run it inside
+docker.
+
+#+NAME: Our docker image
+#+begin_src docker :tangle ./Dockerfile :comments no
+FROM postgres:14-bullseye
+RUN apt-get update
+RUN apt-get -y install python3 postgresql-plpython3-14
+#+end_src
+
+The cluster job also has access to a workspace directory.  Part of the job will be to pull
+in files located in this dir to populate the tables.  For this review, we'll create a directory, mount
+it in the docker container, and move all our neessary files to this workspace.
+
+#+NAME: create dir
+#+begin_src sh
+mkdir ws
+#+end_src
+
+#+RESULTS: create dir
+#+begin_src sh
+#+end_src
+
+After tangling the docker file, we can start our empty db.
+
+#+begin_src tmate :window docker
+docker build -t infradb:1 .
+#+end_src
+
 #+begin_src tmate :window docker
 docker run --rm --name infradb \
     -e POSTGRES_PASSWORD=infradb \
     -p 5432:5432 \
-    postgres:14-bullseye
+    -v $(pwd)/ws:/workspace
+    infradb:1
 #+end_src
 
 
@@ -31,17 +62,29 @@ This will start a db with the following credentials:
 With these, we should be able to connect to it through this org file.
 We should expect no relations, a clean db.
 
-#+NAME: connect to our db
+#+NAME: database say hi
 #+begin_src sql-mode
-\d
+\
+d
 #+end_src
 
-#+RESULTS: connect to our db
+#+RESULTS: database say hi
 #+begin_SRC example
 Did not find any relations.
 #+end_SRC
 
-* DONE Get authenticated for data fetching
+and lastly, we will create the plpython3u extension
+
+#+begin_src sql-mode
+create extension plpython3u;
+#+end_src
+
+#+RESULTS:
+#+begin_SRC example
+CREATE EXTENSION
+#+end_SRC
+
+* Get authenticated for data fetching
 We will need to use bq and gsutil for half of the data fetching.
 #+begin_src shell
 bq version
@@ -122,8 +165,8 @@ tree ~/tmp/workspace
 0 directories, 0 files
 #+end_src
 
-* DONE [2/2] Get the latest successful jobs
-** DONE Fetch Data
+* Get the latest successful jobs
+** Fetch Data
 #+NAME: fetch latest successful jobs
 #+begin_src sh
 bq query -q \
@@ -135,12 +178,12 @@ bq query -q \
        from k8s-gubernator.build.all
       where result = 'SUCCESS'
      qualify ROW_NUMBER() OVER(PARTITION BY job ORDER BY number desc) = 1 ;" \
-| jq -cr .[] > ~/tmp/workspace/latest_successful_jobs.json
+| jq -cr .[] > workspace/latest_successful_jobs.json
 #+end_src
 
 This should give us a file where each line is valid json
 #+begin_src sh
-head -3 ~/tmp/workspace/latest_successful_jobs.json
+head -3 workspace/latest_successful_jobs.json
 #+end_src
 
 #+RESULTS:
@@ -150,18 +193,9 @@ head -3 ~/tmp/workspace/latest_successful_jobs.json
 {"job":"ci-cri-containerd-e2e-cos-gce-ingress","number":"1508137308472217600","path":"gs://kubernetes-jenkins/logs/ci-cri-containerd-e2e-cos-gce-ingress/1508137308472217600","started":"2022-03-27 17:42:12"}
 #+end_src
 
-** DONE Load into postgres
+** Load into postgres
 I think it is best to make separate tables for each of our raw
 data, and then combine them into a view.
-
-#+begin_src sql-mode
-drop table successful_jobs;
-#+end_src
-
-#+RESULTS:
-#+begin_SRC example
-DROP TABLE
-#+end_SRC
 
 #+NAME: Schema for latest successful jobs
 #+begin_src sql-mode
@@ -172,6 +206,12 @@ number text,
 started timestamp,
 primary key (job, path)
 );
+
+comment on table successful_jobs "prow jobs that have finished successfully, according to bq";
+comment on column successful_jobs.job is "the prow job name";
+comment on column successful_jobs.number is "the number of this job run. Goes up incrementally";
+comment on column successful_jobs.path is "where artifact will be stored. prowjob + number";
+comment on column successful_jobs.started is "Date and Time this job was run";
 #+end_src
 
 #+RESULTS: Schema for latest successful jobs
@@ -183,7 +223,7 @@ CREATE TABLE
 #+begin_src sql-mode
 begin;
 create temporary table success_import(data jsonb);
-\copy success_import(data)  from '~/tmp/workspace/latest_successful_jobs.json' csv quote e'\x01' delimiter e'\x02';
+\copy success_import(data)  from 'ws/latest_successful_jobs.json' csv quote e'\x01' delimiter e'\x02';
 
 insert into successful_jobs(job,path,number,started)
 select  i.data->>'job',
@@ -204,32 +244,25 @@ postgres=*# postgres=*# postgres-*# postgres-*# postgres-*# postgres-*# postgres
 postgres=*# postgres=*# COMMIT
 #+end_SRC
 
-Now we can query the jobs by timestamp, like the last
-10 jobs that ran in the last 12 hours, ordered by earliest
+Now we can query the jobs by timestamp.  One thing we will want is the # of jobs that have run this month.
+we can query that as:
 #+begin_src sql-mode
-select job, path, started
-from successful_jobs
-where number is null
-order by started asc
-limit 10;
+select count(*)
+  from successful_jobs
+ where started >= now() - interval '30 days';
 #+end_src
 
 #+RESULTS:
 #+begin_SRC example
-                               job                               |                                                               path                                                               |       started
------------------------------------------------------------------+----------------------------------------------------------------------------------------------------------------------------------+---------------------
- pull-kubernetes-verify                                          | gs://kubernetes-jenkins/logs/pull-kubernetes-verify/20161016-0756271e80eef7b01f7529-3685                                         | 2016-10-16 07:56:27
- ci-kubernetes-e2e-gce-ubuntu-node-prow                          | gs://kubernetes-jenkins/logs/ci-kubernetes-e2e-gce-ubuntu-node-prow/20170802-211931--116b094ba9c718b6-7                          | 2017-08-02 21:19:31
- ci-kubernetes-e2enode-cosstable1-k8sstable1-default-defaultspec | gs://kubernetes-jenkins/logs/ci-kubernetes-e2enode-cosstable1-k8sstable1-default-defaultspec/20170807-204445--18a650865f3197bb-7 | 2017-08-07 20:44:45
- pr:632                                                          | gs://kubernetes-jenkins/pr-logs/pull/kubeflow_testing/632/kubeflow-testing-presubmit                                             | 2020-03-26 00:48:29
-(4 rows)
+ count
+-------
+  1884
+(1 row)
 
 #+end_SRC
 
-Sweet, onto the next!
-
 * TODO Get information about prow configs
-* DONE Get job paths and sizes
+* Get job paths and sizes
 ** Fetch Data
 This is likely goihng to change, and we had to do a lot of terminal work to get the data exactly as we watned, but this is a good
 scrap to remind us before we build a better verison
@@ -254,6 +287,11 @@ time timestamp,
 path text primary key
 );
 
+comment on table job_gcs_output is 'the path and size of resulting files from a test run';
+comment on column job_gcs_output.size is 'size of the file in bytes';
+comment on column job_gcs_output.time is 'time file was added';
+comment on column job_gcs_output.path is 'full filepath';
+
 create temporary table job_import(size text, time text, path text);
 
 \copy job_import(size,time,path)  from '~/tmp/workspace/massaged.csv' csv;
@@ -272,72 +310,97 @@ commit;
 #+begin_SRC example
 BEGIN
 postgres=*# postgres(*# postgres(*# postgres(*# postgres(*# CREATE TABLE
+postgres=*# postgres=*# COMMENT
+postgres=*# COMMENT
+postgres=*# COMMENT
+postgres=*# COMMENT
 postgres=*# postgres=*# CREATE TABLE
 postgres=*# postgres=*# COPY 435919
 postgres=*# postgres=*# postgres=*# postgres-*# postgres-*# postgres-*# postgres-*# postgres-*# INSERT 0 435919
 postgres=*# COMMIT
 #+end_SRC
 
-* STRT Query combined data
-So now we can combine our latest_successful_jobs with this job_gcs_output to get info on specific jobsj
-** jobs with images-containerd.log in output
-We want to find jobs whose output contains images-containerd.log...with the end goal to be to load up this log into the db.
+Fantastic, now we can combine this with our successful jobs, to see the total artifact file size for the last 30 days' successful jobs
 
-First, let's see if we can filter on this output
+#+NAME: total file size of month's jobs
 #+begin_src sql-mode
-    select count(distinct path)
-    from job_gcs_output
-    where path like '%images-containerd.log'
-    limit 5;
+create materialized view recent_jobs as
+  select s.job,
+         s.number,
+         s.started,
+         j.path,
+         j.size
+select j.size , s.job
+  from      job_gcs_output j
+            join successful_jobs s on (j.path like '%'||s.path||'%')
+ where s.started >= now() - interval '30 days'
+       limit 10;
+#+end_src
+
+#+begin_src sql-mode
+create materialized view recent_jobs as
+select
+  s.job,
+  s.started,
+  j.size,
+  substring(substring(j.path, '\/[a-z\-_:\.\$ ()A-Z0-9]+$'),2) as file,
+  j.path
+  from      job_gcs_output j
+            join successful_jobs s on (j.path like '%'||s.path||'%')
+ where s.started >= now() - interval '30 days';
 #+end_src
 
 #+RESULTS:
 #+begin_SRC example
- count
--------
-   351
+SELECT 411133
+#+end_SRC
+
+#+begin_src sql-mode
+select (sum(size)/1073741824) as size_in_gb -- there are 1,073,741,824 bytes in a gB
+  from recent_jobs where file like '%json'
+                      or file like '%log';
+#+end_src
+
+#+RESULTS:
+#+begin_SRC example
+      size_in_gb
+----------------------
+ 113.2267135195434093
 (1 row)
 
 #+end_SRC
 
-Great, now we want to combine this with our successful jobs, to get the job name.
-
-
-#+begin_src sql-mode
-select s.job, j.path
-from
-job_gcs_output j
-join successful_jobs s on j.path like '%'||s.path||'%'
-where j.path like '%images-containerd.log'
-limit 5;
-#+end_src
-
-#+RESULTS:
+#+RESULTS: total file size of month's jobs
 #+begin_SRC example
-                  job                  |                                                                          path
----------------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------
- ci-cri-containerd-e2e-cos-gce-ingress | gs://kubernetes-jenkins/logs/ci-cri-containerd-e2e-cos-gce-ingress/1508137308472217600/artifacts/bootstrap-e2e-master/images-containerd.log
- ci-cri-containerd-e2e-cos-gce-ingress | gs://kubernetes-jenkins/logs/ci-cri-containerd-e2e-cos-gce-ingress/1508137308472217600/artifacts/bootstrap-e2e-minion-group-jcm7/images-containerd.log
- ci-cri-containerd-e2e-cos-gce-ingress | gs://kubernetes-jenkins/logs/ci-cri-containerd-e2e-cos-gce-ingress/1508137308472217600/artifacts/bootstrap-e2e-minion-group-p8cd/images-containerd.log
- ci-cri-containerd-e2e-cos-gce-ingress | gs://kubernetes-jenkins/logs/ci-cri-containerd-e2e-cos-gce-ingress/1508137308472217600/artifacts/bootstrap-e2e-minion-group-tq61/images-containerd.log
- pr:pull-kubernetes-e2e-gci-gce-ipvs   | gs://kubernetes-jenkins/pr-logs/pull/109060/pull-kubernetes-e2e-gci-gce-ipvs/1508131198545694720/artifacts/bootstrap-e2e-master/images-containerd.log
-(5 rows)
+ size  |                    job
+-------+-------------------------------------------
+ 97990 | e2e-kops-grid-cilium-amzn2-k21-containerd
+  1681 | e2e-kops-grid-cilium-amzn2-k21-containerd
+  9198 | e2e-kops-grid-cilium-amzn2-k21-containerd
+ 19161 | e2e-kops-grid-cilium-amzn2-k21-containerd
+ 13932 | e2e-kops-grid-cilium-amzn2-k21-containerd
+  1595 | e2e-kops-grid-cilium-amzn2-k21-containerd
+  8672 | e2e-kops-grid-cilium-amzn2-k21-containerd
+ 15136 | e2e-kops-grid-cilium-amzn2-k21-containerd
+ 98426 | e2e-kops-grid-cilium-amzn2-k21-containerd
+  1595 | e2e-kops-grid-cilium-amzn2-k21-containerd
+(10 rows)
 
 #+end_SRC
 
-There seems to be multiple entries for each of these, as there are multiple artifacts that contain an images-containerd.log.
-
-What we want to do now is, for each of these rows, fetch the log to put into a log table, where we can parse through the json as needed.
-** function: load containerd.json for job
+* scratch
+** STRT Query combined data
+So now we can combine our latest_successful_jobs with this job_gcs_output to get info on specific jobsj
+*** function: load containerd.json for job
 We want to loop over our resulting files, fetch them from gcsweb.k8s.io and insert them into a files table.
 that files table can have the job, the path, the started (for the job), the filename,
 #+begin_src sql-mode
     begin;
 create table file(
 filename text,
-job text, --references successful_jobs(job),
-started timestamp, --references successful_jobs(started),
-path text references job_gcs_output(path), --references job_gcs_output(path),
+job text,
+started timestamp,
+path text,
 text_content text,
 json jsonb
 );
@@ -351,8 +414,17 @@ postgres=*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres
 postgres=*# COMMIT
 #+end_SRC
 
-* Initial function
+** Initial function
 given a path, construct a publ;ic link from it, then return the value.
+
+#+begin_src sql-mode
+drop function fetch_file;
+#+end_src
+
+#+RESULTS:
+#+begin_SRC example
+DROP FUNCTION
+#+end_SRC
 
 #+NAME: initial function
 #+begin_src sql-mode
@@ -361,15 +433,28 @@ begin;
 create function fetch_file(filepath text) returns text
 as $$
     import urllib.request
+    import hashlib
+
+    workdir = '/workspace/'
 
     public_prefix = 'https://gcsweb.k8s.io/gcs/';
     path = filepath.replace("gs://","")
     link = public_prefix + path
-    file = ""
+    output = ""
 
     with urllib.request.urlopen(link) as response:
-     file = response.read()
-    return file
+
+     # create a hash for the resulting filename
+     hash_object = hashlib.sha256(filepath.encode('utf-8'))
+     hex_dig = hash_object.hexdigest()
+     output = workdir + str(hex_dig) + '.txt'
+
+     # read the file
+     file = str(response.read())
+     f = open(output, 'w')
+     f.write(file)
+     f.close()
+    return output
     end;
 $$ language plpython3u;
 
@@ -379,60 +464,179 @@ commit;
 #+RESULTS: initial function
 #+begin_SRC example
 BEGIN
-postgres=*# postgres=*# postgres-*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# CREATE FUNCTION
+postgres=*# postgres=*# postgres-*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# CREATE FUNCTION
 postgres=*# postgres=*# COMMIT
 #+end_SRC
 
 With the fetch file, we can build out another function that inserts into our file table
 
 #+begin_src sql-mode
+\d+ recent_jobs;
+#+end_src
+
+#+RESULTS:
+#+begin_SRC example
+                                            Materialized view "public.recent_jobs"
+ Column  |            Type             | Collation | Nullable | Default | Storage  | Compression | Stats target | Description
+---------+-----------------------------+-----------+----------+---------+----------+-------------+--------------+-------------
+ job     | text                        |           |          |         | extended |             |              |
+ started | timestamp without time zone |           |          |         | plain    |             |              |
+ size    | bigint                      |           |          |         | plain    |             |              |
+ file    | text                        |           |          |         | extended |             |              |
+ path    | text                        |           |          |         | extended |             |              |
+View definition:
+ SELECT s.job,
+    s.started,
+    j.size,
+    "substring"("substring"(j.path, '\/[a-z\-_:\.\$ ()A-Z0-9]+$'::text), 2) AS file,
+    j.path
+   FROM job_gcs_output j
+     JOIN successful_jobs s ON j.path ~~ (('%'::text || s.path) || '%'::text)
+  WHERE s.started >= (now() - '30 days'::interval);
+Access method: heap
+
+#+end_SRC
+
+#+NAME: insert_file fn
+#+begin_src sql-mode
 begin;
-create function insert_file(filename text, filepath text) returns text
+create procedure insert_file(filepath text)
 as $$
   declare
-  p text;
+  blob_path text;
+  copy_command text;
 begin
-  -- insert into file(filename, job, started, path)
 
-  -- select filename,
-  --        s.job,
-  --        s.started,
-  --        j.path
-  --   from job_gcs_output j
-  --        join successful_jobs s on (j.path like '%'||s.path||'%')
-  --  where j.path = filepath;
+  blob_path = fetch_file(filepath);
 
-  -- blob = fetch_file(f)
+  raise notice '%', blob_path;
 
-  -- if f like '%.json' then
-  --   update file
-  --   set json = to_json(blob)
-  --   where file.path
-  -- else
-  --   update
+  insert into file(filename,job,started,path)
 
-  select filepath into p;
-   --  from job_gcs_output j
-   -- where j.path = filepath
-   -- limit 1;
-  return p;
+  select j.file as filename,
+         j.job,
+         j.started,
+         j.path
+    from recent_jobs j
+   where j.path = filepath;
+
+  copy_command := 'copy file(text_content) from'||blob_path||'where file.path = '||filepath||';'
+  execute copy_command
 end;
 $$
 language plpgsql;
 
-select * from insert_file('images-containerd.log',
-                          ' gs://kubernetes-jenkins/logs/ci-kubernetes-e2e-gce-coredns-performance/1508096287960993792/artifacts/gce-coredns-perf-master/images-containerd.log');
+call insert_file('gs://kubernetes-jenkins/logs/ci-kubernetes-e2e-gce-coredns-performance/1508096287960993792/artifacts/gce-coredns-perf-master/images-containerd.log');
+
+select filename,job,started from file;
+rollback;
+#+end_src
+
+#+RESULTS: insert_file fn
+#+begin_SRC example
+BEGIN
+postgres=*# postgres-*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres-*# ERROR:  "copy_command" is not a known variable
+LINE 19:   copy_command := 'copy file(text_content) from'||blob_path|...
+           ^
+postgres=!# postgres=!# ERROR:  current transaction is aborted, commands ignored until end of transaction block
+postgres=!# postgres=!# ERROR:  current transaction is aborted, commands ignored until end of transaction block
+postgres=!# ROLLBACK
+#+end_SRC
+
+#+begin_src sql-mode
+begin;
+
+create procedure insert_files_for(filename text)
+as $$
+  declare
+  table_record RECORD;
+begin
+  for table_record in
+    select * from job_gcs_output where path like '%'||filename
+    loop
+    call insert_file(filename, table_record.path);
+    end loop;
+end;
+$$ language plpgsql;
+
+call insert_files_for('images-containerd.log');
+select count(*) from file;
 rollback;
 #+end_src
 
 #+RESULTS:
 #+begin_SRC example
 BEGIN
-postgres=*# postgres-*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres-*# CREATE FUNCTION
-postgres=*# postgres=*# postgres(*#                                                                      insert_file
-------------------------------------------------------------------------------------------------------------------------------------------------------
-  gs://kubernetes-jenkins/logs/ci-kubernetes-e2e-gce-coredns-performance/1508096287960993792/artifacts/gce-coredns-perf-master/images-containerd.log
+postgres=*# postgres-*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres-*# CREATE PROCEDURE
+postgres=*# postgres=*# postgres-*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# CREATE PROCEDURE
+postgres=*# postgres=*# CALL
+postgres=*#  count
+-------
+   351
 (1 row)
 
 postgres=*# ROLLBACK
+#+end_SRC
+
+#+begin_src sql-mode
+select count(*) from successful_jobs where started >= '2022-03-01';
+#+end_src
+
+#+RESULTS:
+#+begin_SRC example
+ count
+-------
+  1864
+(1 row)
+
+#+end_SRC
+
+
+#+begin_src sql-mode
+select count(*)
+  from job_gcs_output j
+       inner join successful_jobs s on j.path like '%'||s.path||'%'
+  where s.started >= '2022-03-01';
+-- select ((sum(size)/1024)/1024)/1024  as size
+--   from job_gcs_output j;
+--        where s.started >= '2022-03-01';
+#+end_src
+
+
+
+#+RESULTS:
+#+begin_SRC example
+ count
+-------
+     8
+     8
+     8
+     8
+     8
+     8
+     8
+     8
+     8
+     8
+(10 rows)
+
+#+end_SRC
+
+#+begin_src sql-mode
+\d+ successful_jobs
+#+end_src
+
+#+RESULTS:
+#+begin_SRC example
+                                                Table "public.successful_jobs"
+ Column  |            Type             | Collation | Nullable | Default | Storage  | Compression | Stats target | Description
+---------+-----------------------------+-----------+----------+---------+----------+-------------+--------------+-------------
+ job     | text                        |           | not null |         | extended |             |              |
+ path    | text                        |           | not null |         | extended |             |              |
+ number  | text                        |           |          |         | extended |             |              |
+ started | timestamp without time zone |           |          |         | plain    |             |              |
+Indexes:
+    "successful_jobs_pkey" PRIMARY KEY, btree (job, path)
+Access method: heap
+
 #+end_SRC
