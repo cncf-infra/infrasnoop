@@ -394,9 +394,10 @@ So now we can combine our latest_successful_jobs with this job_gcs_output to get
 *** function: load containerd.json for job
 We want to loop over our resulting files, fetch them from gcsweb.k8s.io and insert them into a files table.
 that files table can have the job, the path, the started (for the job), the filename,
+
 #+begin_src sql-mode
     begin;
-create table file(
+create unlogged table file(
 filename text,
 job text,
 started timestamp,
@@ -416,15 +417,6 @@ postgres=*# COMMIT
 
 ** Initial function
 given a path, construct a publ;ic link from it, then return the value.
-
-#+begin_src sql-mode
-drop function fetch_file;
-#+end_src
-
-#+RESULTS:
-#+begin_SRC example
-DROP FUNCTION
-#+end_SRC
 
 #+NAME: initial function
 #+begin_src sql-mode
@@ -464,8 +456,8 @@ commit;
 #+RESULTS: initial function
 #+begin_SRC example
 BEGIN
-postgres=*# postgres=*# postgres-*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# CREATE FUNCTION
-postgres=*# postgres=*# COMMIT
+postgres=*# postgres=*# postgres-*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# ERROR:  function "fetch_file" already exists with same argument types
+postgres=!# postgres=!# ROLLBACK
 #+end_SRC
 
 With the fetch file, we can build out another function that inserts into our file table
@@ -509,8 +501,6 @@ begin
 
   blob_path = fetch_file(filepath);
 
-  raise notice '%', blob_path;
-
   insert into file(filename,job,started,path)
 
   select j.file as filename,
@@ -520,27 +510,20 @@ begin
     from recent_jobs j
    where j.path = filepath;
 
-  copy_command := 'copy file(text_content) from'||blob_path||'where file.path = '||filepath||';'
-  execute copy_command
+  copy_command = 'copy file(text_content) from '''||blob_path||''' where file.path = '''||filepath||''';';
+  execute copy_command;
 end;
 $$
 language plpgsql;
 
-call insert_file('gs://kubernetes-jenkins/logs/ci-kubernetes-e2e-gce-coredns-performance/1508096287960993792/artifacts/gce-coredns-perf-master/images-containerd.log');
-
-select filename,job,started from file;
-rollback;
+commit;
 #+end_src
 
 #+RESULTS: insert_file fn
 #+begin_SRC example
 BEGIN
-postgres=*# postgres-*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres-*# ERROR:  "copy_command" is not a known variable
-LINE 19:   copy_command := 'copy file(text_content) from'||blob_path|...
-           ^
-postgres=!# postgres=!# ERROR:  current transaction is aborted, commands ignored until end of transaction block
-postgres=!# postgres=!# ERROR:  current transaction is aborted, commands ignored until end of transaction block
-postgres=!# ROLLBACK
+postgres=*# postgres-*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres-*# CREATE PROCEDURE
+postgres=*# postgres=*# COMMIT
 #+end_SRC
 
 #+begin_src sql-mode
@@ -552,91 +535,13 @@ as $$
   table_record RECORD;
 begin
   for table_record in
-    select * from job_gcs_output where path like '%'||filename
+    select * from recent_jobs where recent_jobs.file like '%'||filename
     loop
-    call insert_file(filename, table_record.path);
+    call insert_file(table_record.path);
     end loop;
 end;
 $$ language plpgsql;
 
 call insert_files_for('images-containerd.log');
-select count(*) from file;
-rollback;
+commit;
 #+end_src
-
-#+RESULTS:
-#+begin_SRC example
-BEGIN
-postgres=*# postgres-*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres-*# CREATE PROCEDURE
-postgres=*# postgres=*# postgres-*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# CREATE PROCEDURE
-postgres=*# postgres=*# CALL
-postgres=*#  count
--------
-   351
-(1 row)
-
-postgres=*# ROLLBACK
-#+end_SRC
-
-#+begin_src sql-mode
-select count(*) from successful_jobs where started >= '2022-03-01';
-#+end_src
-
-#+RESULTS:
-#+begin_SRC example
- count
--------
-  1864
-(1 row)
-
-#+end_SRC
-
-
-#+begin_src sql-mode
-select count(*)
-  from job_gcs_output j
-       inner join successful_jobs s on j.path like '%'||s.path||'%'
-  where s.started >= '2022-03-01';
--- select ((sum(size)/1024)/1024)/1024  as size
---   from job_gcs_output j;
---        where s.started >= '2022-03-01';
-#+end_src
-
-
-
-#+RESULTS:
-#+begin_SRC example
- count
--------
-     8
-     8
-     8
-     8
-     8
-     8
-     8
-     8
-     8
-     8
-(10 rows)
-
-#+end_SRC
-
-#+begin_src sql-mode
-\d+ successful_jobs
-#+end_src
-
-#+RESULTS:
-#+begin_SRC example
-                                                Table "public.successful_jobs"
- Column  |            Type             | Collation | Nullable | Default | Storage  | Compression | Stats target | Description
----------+-----------------------------+-----------+----------+---------+----------+-------------+--------------+-------------
- job     | text                        |           | not null |         | extended |             |              |
- path    | text                        |           | not null |         | extended |             |              |
- number  | text                        |           |          |         | extended |             |              |
- started | timestamp without time zone |           |          |         | plain    |             |              |
-Indexes:
-    "successful_jobs_pkey" PRIMARY KEY, btree (job, path)
-Access method: heap
-
-#+end_SRC
