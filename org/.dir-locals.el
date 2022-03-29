@@ -21,7 +21,7 @@
            (if (getenv "PGHOST")
                (getenv "PGHOST")
              (if (file-exists-p "/var/run/secrets/kubernetes.io/serviceaccount/namespace")
-                 "k8s-infra.infrasnoop"
+                 "k8s-infra-pooler.infrasnoop"
                "localhost"
                )))
       (set (make-local-variable 'sql-port)
