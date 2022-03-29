@@ -4,6 +4,16 @@ metadata:
   name: k8s-infra
   namespace: infrasnoop
 spec:
+  enableConnectionPooler: true
+  connectionPooler:
+    mode: session
+    resources:
+      requests:
+        cpu: 250m
+        memory: 100Mi
+      limits:
+        cpu: "1"
+        memory: 100Mi
   teamId: "k8s"
   volume:
     size: 20Gi
