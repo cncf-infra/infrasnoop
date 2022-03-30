@@ -25,18 +25,18 @@ helm template postgres-operator -n postgres-operator https://raw.githubuserconte
 
 #+RESULTS:
 #+begin_src yaml
-namespace/postgres-operator created
-customresourcedefinition.apiextensions.k8s.io/operatorconfigurations.acid.zalan.do created
+namespace/postgres-operator configured
+customresourcedefinition.apiextensions.k8s.io/operatorconfigurations.acid.zalan.do unchanged
 manifest_sorter.go:192: info: skipping unknown hook: "crd-install"
 manifest_sorter.go:192: info: skipping unknown hook: "crd-install"
 manifest_sorter.go:192: info: skipping unknown hook: "crd-install"
-serviceaccount/postgres-operator created
-clusterrole.rbac.authorization.k8s.io/postgres-pod created
-clusterrole.rbac.authorization.k8s.io/postgres-operator created
-clusterrolebinding.rbac.authorization.k8s.io/postgres-operator created
-service/postgres-operator created
-deployment.apps/postgres-operator created
-operatorconfiguration.acid.zalan.do/postgres-operator created
+serviceaccount/postgres-operator configured
+clusterrole.rbac.authorization.k8s.io/postgres-pod configured
+clusterrole.rbac.authorization.k8s.io/postgres-operator configured
+clusterrolebinding.rbac.authorization.k8s.io/postgres-operator configured
+service/postgres-operator configured
+deployment.apps/postgres-operator configured
+operatorconfiguration.acid.zalan.do/postgres-operator unchanged
 #+end_src
 
 *** delete
@@ -55,21 +55,22 @@ kubectl get all -n postgres-operator
 #+RESULTS: postgres-operator
 #+begin_example
 NAME                                   CREATED AT
-operatorconfigurations.acid.zalan.do   2022-03-30T16:43:23Z
+operatorconfigurations.acid.zalan.do   2022-03-29T01:51:35Z
 NAME                                     READY   STATUS    RESTARTS   AGE
-pod/postgres-operator-7b67f8857d-2xc7k   1/1     Running   0          14m
+pod/postgres-operator-7b67f8857d-27m8p   1/1     Running   0          8s
 
 NAME                        TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)    AGE
-service/postgres-operator   ClusterIP   10.100.35.215   <none>        8080/TCP   14m
+service/postgres-operator   ClusterIP   10.101.41.182   <none>        8080/TCP   39h
 
 NAME                                READY   UP-TO-DATE   AVAILABLE   AGE
-deployment.apps/postgres-operator   1/1     1            1           14m
+deployment.apps/postgres-operator   1/1     1            1           39h
 
 NAME                                           DESIRED   CURRENT   READY   AGE
-replicaset.apps/postgres-operator-7b67f8857d   1         1         1       14m
+replicaset.apps/postgres-operator-7b67f8857d   1         1         1       8s
+replicaset.apps/postgres-operator-7bc878b7f6   0         0         0       39h
 
 NAME                                                    IMAGE                                               CLUSTER-LABEL   SERVICE-ACCOUNT   MIN-INSTANCES   AGE
-operatorconfiguration.acid.zalan.do/postgres-operator   registry.opensource.zalan.do/acid/spilo-14:2.1-p3   cluster-name    postgres-pod      -1              14m
+operatorconfiguration.acid.zalan.do/postgres-operator   registry.opensource.zalan.do/acid/spilo-14:2.1-p3   cluster-name    postgres-pod      -1              39h
 #+end_example
 
 ** csi-gcs
@@ -104,22 +105,14 @@ kubectl get pods -n kube-system -l app=csi-gcs
 
 #+RESULTS: csidrivers
 #+begin_example
-NAME                                   CREATED AT
-operatorconfigurations.acid.zalan.do   2022-03-30T16:43:23Z
-NAME                                     READY   STATUS    RESTARTS   AGE
-pod/postgres-operator-7b67f8857d-2xc7k   1/1     Running   0          13m
-
-NAME                        TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)    AGE
-service/postgres-operator   ClusterIP   10.100.35.215   <none>        8080/TCP   13m
-
-NAME                                READY   UP-TO-DATE   AVAILABLE   AGE
-deployment.apps/postgres-operator   1/1     1            1           13m
-
-NAME                                           DESIRED   CURRENT   READY   AGE
-replicaset.apps/postgres-operator-7b67f8857d   1         1         1       13m
-
-NAME                                                    IMAGE                                               CLUSTER-LABEL   SERVICE-ACCOUNT   MIN-INSTANCES   AGE
-operatorconfiguration.acid.zalan.do/postgres-operator   registry.opensource.zalan.do/acid/spilo-14:2.1-p3   cluster-name    postgres-pod      -1              13m
+NAME                       SERVICE   AVAILABLE   AGE
+v1beta1.gcs.csi.ofek.dev   Local     True        35s
+NAME               ATTACHREQUIRED   PODINFOONMOUNT   STORAGECAPACITY   TOKENREQUESTS   REQUIRESREPUBLISH   MODES        AGE
+gcs.csi.ofek.dev   false            true             false             <unset>         false               Persistent   35s
+NAME      DESIRED   CURRENT   READY   UP-TO-DATE   AVAILABLE   NODE SELECTOR            AGE
+csi-gcs   1         1         1       1            1           kubernetes.io/os=linux   35s
+NAME            READY   STATUS    RESTARTS   AGE
+csi-gcs-tfgwx   4/4     Running   0          35s
 #+end_example
 
 *** setup
@@ -128,414 +121,183 @@ This is for manual setup of gcloud service account secret key.
 kubectl -n default create secret generic csi-gcs-secret --from-file=key=ii-service-account.json
 #+end_src
 
-
-* tilt
-#+begin_src tmate :window tilt :prologue "cdr\n"
+* tmate setup
+** tilt
+#+begin_src tmate :window tilt  :prologue "cd ~/cncf-infra/infrasnoop\n"
 kubectl config set-context --current --namespace=infrasnoop
 tilt up --legacy --host 0.0.0.0
+#+end_src
+** sqlport forward
+#+begin_src tmate :window psql-port  :prologue "cd ~/cncf-infra/infrasnoop\n"
+kubectl port-forward -n infrasnoop pod/infra-db-0 5432:5432
 #+end_src
 * namespace
 #+begin_src shell :results none
 kubectl config set-context --current --namespace=infrasnoop
 #+end_src
 * monitoring infra-db
+** Events
+#+begin_src tmate :window infra-db-events
+kubectl get event -w --field-selector involvedObject.name=infra-db-0
+#+end_src
+** Status
+#+name: status.conditions
+#+begin_src shell
+kubectl get pod/infra-db-0 -o=jsonpath='{.status.conditions}' | jq .
+#+end_src
+
+#+RESULTS: status.conditions
+#+begin_example
+[
+  {
+    "lastProbeTime": null,
+    "lastTransitionTime": "2022-03-30T17:57:14Z",
+    "status": "True",
+    "type": "Initialized"
+  },
+  {
+    "lastProbeTime": null,
+    "lastTransitionTime": "2022-03-30T17:57:15Z",
+    "status": "True",
+    "type": "Ready"
+  },
+  {
+    "lastProbeTime": null,
+    "lastTransitionTime": "2022-03-30T17:57:15Z",
+    "status": "True",
+    "type": "ContainersReady"
+  },
+  {
+    "lastProbeTime": null,
+    "lastTransitionTime": "2022-03-30T17:50:30Z",
+    "status": "True",
+    "type": "PodScheduled"
+  }
+]
+#+end_example
+
+** podwatch
+#+begin_src  tmate :window pod-watch
+kubectl get pods --watch
+#+end_src
+** initContainers
+*** status
+#+name: initContainerStatuses
+#+begin_src shell :wrap "src yaml"
+kubectl get pod infra-db-0 -o=jsonpath='{.status.initContainerStatuses}' | jq .
+#+end_src
+
+#+RESULTS: initContainerStatuses
+#+begin_src yaml
+[
+  {
+    "containerID": "docker://8f40b7355befaf980f53213ead6425b28a29258e7f6255bfcd4bff2ba615981d",
+    "image": "bitnami/git:latest",
+    "imageID": "docker-pullable://bitnami/git@sha256:7e2cc98de41f7141214290d0a2684fc5eec269c66b4fa891e46a845e0cade25d",
+    "lastState": {},
+    "name": "init-clone-k8s-infra",
+    "ready": true,
+    "restartCount": 0,
+    "state": {
+      "terminated": {
+        "containerID": "docker://8f40b7355befaf980f53213ead6425b28a29258e7f6255bfcd4bff2ba615981d",
+        "exitCode": 0,
+        "finishedAt": "2022-03-30T17:50:42Z",
+        "reason": "Completed",
+        "startedAt": "2022-03-30T17:50:38Z"
+      }
+    }
+  },
+  {
+    "containerID": "docker://3e597ae4545d299b15219fd89805cbbcd21b81239a8af68511fdeb4f09ade30f",
+    "image": "ko-local/infrasnoop:tilt-build-1648438835",
+    "imageID": "docker://sha256:fdaf42b14575f2c371c5b927b3e7f9f2b10fc11c885d85fe5e834e889a44ab45",
+    "lastState": {},
+    "name": "init-dump-prowjobconfig",
+    "ready": true,
+    "restartCount": 0,
+    "state": {
+      "terminated": {
+        "containerID": "docker://3e597ae4545d299b15219fd89805cbbcd21b81239a8af68511fdeb4f09ade30f",
+        "exitCode": 0,
+        "finishedAt": "2022-03-30T17:50:45Z",
+        "reason": "Completed",
+        "startedAt": "2022-03-30T17:50:43Z"
+      }
+    }
+  },
+  {
+    "containerID": "docker://6d708b6f96132d684dfe0f4953b5fda0a7fd47ad1e9a4067191843584956cab5",
+    "image": "google/cloud-sdk:378.0.0",
+    "imageID": "docker-pullable://google/cloud-sdk@sha256:f94bacf262ad8f5e7173cea2db3d969c43b938a036e3c6294036c3d96261f2f4",
+    "lastState": {},
+    "name": "init-dump-k8s-gubernator",
+    "ready": true,
+    "restartCount": 0,
+    "state": {
+      "terminated": {
+        "containerID": "docker://6d708b6f96132d684dfe0f4953b5fda0a7fd47ad1e9a4067191843584956cab5",
+        "exitCode": 0,
+        "finishedAt": "2022-03-30T17:51:21Z",
+        "reason": "Completed",
+        "startedAt": "2022-03-30T17:50:46Z"
+      }
+    }
+  },
+  {
+    "containerID": "docker://6eba208874e218d717f26277a569f4ff70336fe43b996102835f52ddf624beb0",
+    "image": "google/cloud-sdk:378.0.0",
+    "imageID": "docker-pullable://google/cloud-sdk@sha256:f94bacf262ad8f5e7173cea2db3d969c43b938a036e3c6294036c3d96261f2f4",
+    "lastState": {},
+    "name": "init-dump-job-results-gcs",
+    "ready": true,
+    "restartCount": 0,
+    "state": {
+      "terminated": {
+        "containerID": "docker://6eba208874e218d717f26277a569f4ff70336fe43b996102835f52ddf624beb0",
+        "exitCode": 0,
+        "finishedAt": "2022-03-30T17:57:13Z",
+        "reason": "Completed",
+        "startedAt": "2022-03-30T17:51:22Z"
+      }
+    }
+  }
+]
+#+end_src
+*** logs
+#+name: jobs-results
+#+begin_src tmate :window job-results-gcs
+kubectl logs infra-db-0 -c init-dump-job-results-gcs -f
+#+end_src
 
 * connect
 #+begin_src sql-mode
-\d
+\d ;
 #+end_src
 
 #+RESULTS:
 #+begin_SRC example
-                          List of relations
-  Schema   |          Name           |       Type        |   Owner
------------+-------------------------+-------------------+------------
- pg_temp_5 | success_import          | table             | infrasnoop
- public    | file                    | table             | infrasnoop
- public    | job_gcs_output          | table             | infrasnoop
- public    | job_gcs_output_id_seq   | sequence          | infrasnoop
- public    | pg_stat_kcache          | view              | postgres
- public    | pg_stat_kcache_detail   | view              | postgres
- public    | pg_stat_statements      | view              | postgres
- public    | pg_stat_statements_info | view              | postgres
- public    | recent_jobs             | materialized view | infrasnoop
- public    | successful_jobs         | table             | infrasnoop
- public    | successful_jobs_id_seq  | sequence          | infrasnoop
-(11 rows)
+\d ;
+                 List of relations
+ Schema |          Name           | Type |  Owner
+--------+-------------------------+------+----------
+ public | pg_stat_kcache          | view | postgres
+ public | pg_stat_kcache_detail   | view | postgres
+ public | pg_stat_statements      | view | postgres
+ public | pg_stat_statements_info | view | postgres
+(4 rows)
 
 #+end_SRC
-* scratch
-#+begin_src sql-mode
-drop table successful_jobs;
-drop table job_gcs_output;
-#+end_src
-
-#+RESULTS:
-#+begin_SRC example
-DROP TABLE
-#+end_SRC
-#+begin_src sql-mode
-drop table success_import;
-#+end_src
-
-#+RESULTS:
-#+begin_SRC example
-DROP TABLE
-#+end_SRC
-
-* retrieve working files
-#+begin_src shell
-kubectl cp -c postgres infra-db-0:/workspace/latest_successful_jobs.json .
-kubectl cp -c postgres infra-db-0:/workspace/ .
-#+end_src
-
-* psql-ui
-Might revisit this
-#+begin_src tmate :session tilt :window fwd-psql-ui
-kubectl port-forward -n default service/postgres-operator-ui 8080:80
-#+end_src
-
-* database
-#+begin_src shell :results none
-kubectl apply -f ./postgresql.yaml
-#+end_src
-
-#+begin_src shell :results none
-kubectl get postgresqls -o yaml k8s-infra
-#+end_src
-
-#+begin_src shell :results none
-kubectl delete -n default pod k8s-infra-0
-#+end_src
-
-#+begin_src shell :results none
-kubectl delete postgresql.acid.zalan.do/k8s-infra
-#+end_src
-
-
-#+begin_src shell
-kubectl get pods
+* infra-db shell
+** gs://kubernetes-jekins => /gs/kubernetes-jenkins
+#+begin_src shell :prologue "kubectl exec -ti infra-db-0 -- bash -c '\n" :epilogue "\n'"
+ls /gs/kubernetes-jenkins
 #+end_src
 
 #+RESULTS:
 #+begin_example
-NAME                                    READY   STATUS                  RESTARTS       AGE
-k8s-infra-0                             0/1     Init:CrashLoopBackOff   7 (105s ago)   14m
-postgres-operator-569b58b8c6-xfhps      1/1     Running                 0              16m
-postgres-operator-ui-585f5566b4-h8ns5   1/1     Running                 0              16m
+logs
+oncall.json
+pr-logs
+shared-results
 #+end_example
-
-#+begin_src shell :wrap src yaml
-kubectl get pods k8s-infra-0 -o yaml
-#+end_src
-
-#+RESULTS:
-#+begin_src yaml
-apiVersion: v1
-kind: Pod
-metadata:
-  creationTimestamp: "2022-03-26T22:23:21Z"
-  generateName: k8s-infra-
-  labels:
-    application: spilo
-    cluster-name: k8s-infra
-    controller-revision-hash: k8s-infra-5fb65fd9ff
-    statefulset.kubernetes.io/pod-name: k8s-infra-0
-    team: k8s
-  name: k8s-infra-0
-  namespace: default
-  ownerReferences:
-  - apiVersion: apps/v1
-    blockOwnerDeletion: true
-    controller: true
-    kind: StatefulSet
-    name: k8s-infra
-    uid: 2def1246-c880-4161-9585-fdbc24cf3c16
-  resourceVersion: "820"
-  uid: 0551cf02-9396-4da7-9755-0808f195d509
-spec:
-  containers:
-  - env:
-    - name: SCOPE
-      value: k8s-infra
-    - name: PGROOT
-      value: /home/postgres/pgdata/pgroot
-    - name: POD_IP
-      valueFrom:
-        fieldRef:
-          apiVersion: v1
-          fieldPath: status.podIP
-    - name: POD_NAMESPACE
-      valueFrom:
-        fieldRef:
-          apiVersion: v1
-          fieldPath: metadata.namespace
-    - name: PGUSER_SUPERUSER
-      value: postgres
-    - name: KUBERNETES_SCOPE_LABEL
-      value: cluster-name
-    - name: KUBERNETES_ROLE_LABEL
-      value: spilo-role
-    - name: PGPASSWORD_SUPERUSER
-      valueFrom:
-        secretKeyRef:
-          key: password
-          name: postgres.k8s-infra.credentials.postgresql.acid.zalan.do
-    - name: PGUSER_STANDBY
-      value: standby
-    - name: PGPASSWORD_STANDBY
-      valueFrom:
-        secretKeyRef:
-          key: password
-          name: standby.k8s-infra.credentials.postgresql.acid.zalan.do
-    - name: PAM_OAUTH2
-      value: https://info.example.com/oauth2/tokeninfo?access_token= uid realm=/employees
-    - name: HUMAN_ROLE
-      value: zalandos
-    - name: PGVERSION
-      value: "14"
-    - name: KUBERNETES_LABELS
-      value: '{"application":"spilo"}'
-    - name: SPILO_CONFIGURATION
-      value: '{"postgresql":{},"bootstrap":{"initdb":[{"auth-host":"md5"},{"auth-local":"trust"}],"users":{"zalandos":{"password":"","options":["CREATEDB","NOLOGIN"]}},"dcs":{}}}'
-    - name: DCS_ENABLE_KUBERNETES_API
-      value: "true"
-    - name: ENABLE_WAL_PATH_COMPAT
-      value: "true"
-    image: registry.opensource.zalan.do/acid/spilo-14:2.1-p3
-    imagePullPolicy: IfNotPresent
-    name: postgres
-    ports:
-    - containerPort: 8008
-      protocol: TCP
-    - containerPort: 5432
-      protocol: TCP
-    - containerPort: 8080
-      protocol: TCP
-    resources:
-      limits:
-        cpu: "1"
-        memory: 500Mi
-      requests:
-        cpu: 100m
-        memory: 100Mi
-    securityContext:
-      allowPrivilegeEscalation: true
-      privileged: false
-      readOnlyRootFilesystem: false
-    terminationMessagePath: /dev/termination-log
-    terminationMessagePolicy: File
-    volumeMounts:
-    - mountPath: /home/postgres/pgdata
-      name: pgdata
-    - mountPath: /dev/shm
-      name: dshm
-    - mountPath: /workspace
-      name: empty
-    - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
-      name: kube-api-access-w9xs6
-      readOnly: true
-  dnsPolicy: ClusterFirst
-  enableServiceLinks: true
-  hostname: k8s-infra-0
-  initContainers:
-  - args:
-    - -c
-    - git clone --depth 1 https://github.com/kubernetes/k8s-infra
-    command:
-    - bash
-    image: bitnami/git
-    imagePullPolicy: Always
-    name: init-clone-k8s-infra
-    resources: {}
-    terminationMessagePath: /dev/termination-log
-    terminationMessagePolicy: File
-    volumeMounts:
-    - mountPath: /workspace
-      name: empty
-    - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
-      name: kube-api-access-w9xs6
-      readOnly: true
-    workingDir: /workspace
-  nodeName: docker-desktop
-  preemptionPolicy: PreemptLowerPriority
-  priority: 0
-  restartPolicy: Always
-  schedulerName: default-scheduler
-  securityContext: {}
-  serviceAccount: postgres-pod
-  serviceAccountName: postgres-pod
-  subdomain: k8s-infra
-  terminationGracePeriodSeconds: 300
-  tolerations:
-  - effect: NoExecute
-    key: node.kubernetes.io/not-ready
-    operator: Exists
-    tolerationSeconds: 300
-  - effect: NoExecute
-    key: node.kubernetes.io/unreachable
-    operator: Exists
-    tolerationSeconds: 300
-  volumes:
-  - name: pgdata
-    persistentVolumeClaim:
-      claimName: pgdata-k8s-infra-0
-  - emptyDir:
-      medium: Memory
-    name: dshm
-  - emptyDir: {}
-    name: empty
-  - name: kube-api-access-w9xs6
-    projected:
-      defaultMode: 420
-      sources:
-      - serviceAccountToken:
-          expirationSeconds: 3607
-          path: token
-      - configMap:
-          items:
-          - key: ca.crt
-            path: ca.crt
-          name: kube-root-ca.crt
-      - downwardAPI:
-          items:
-          - fieldRef:
-              apiVersion: v1
-              fieldPath: metadata.namespace
-            path: namespace
-status:
-  conditions:
-  - lastProbeTime: null
-    lastTransitionTime: "2022-03-26T22:23:23Z"
-    message: 'containers with incomplete status: [init-clone-k8s-infra]'
-    reason: ContainersNotInitialized
-    status: "False"
-    type: Initialized
-  - lastProbeTime: null
-    lastTransitionTime: "2022-03-26T22:23:23Z"
-    message: 'containers with unready status: [postgres]'
-    reason: ContainersNotReady
-    status: "False"
-    type: Ready
-  - lastProbeTime: null
-    lastTransitionTime: "2022-03-26T22:23:23Z"
-    message: 'containers with unready status: [postgres]'
-    reason: ContainersNotReady
-    status: "False"
-    type: ContainersReady
-  - lastProbeTime: null
-    lastTransitionTime: "2022-03-26T22:23:23Z"
-    status: "True"
-    type: PodScheduled
-  containerStatuses:
-  - image: registry.opensource.zalan.do/acid/spilo-14:2.1-p3
-    imageID: ""
-    lastState: {}
-    name: postgres
-    ready: false
-    restartCount: 0
-    started: false
-    state:
-      waiting:
-        reason: PodInitializing
-  hostIP: 192.168.65.4
-  initContainerStatuses:
-  - containerID: docker://c3efa1ce9e955a357d67369bd85c62cd2cf506e4e04d74751e688aa5b2327123
-    image: bitnami/git:latest
-    imageID: docker-pullable://bitnami/git@sha256:9c72aa2cf088597599a6116bdfe7f6864ed80004cc1acfd3e3bdf834e660e19c
-    lastState:
-      terminated:
-        containerID: docker://c3efa1ce9e955a357d67369bd85c62cd2cf506e4e04d74751e688aa5b2327123
-        exitCode: 128
-        finishedAt: "2022-03-26T22:24:22Z"
-        reason: Error
-        startedAt: "2022-03-26T22:24:21Z"
-    name: init-clone-k8s-infra
-    ready: false
-    restartCount: 3
-    state:
-      waiting:
-        message: back-off 40s restarting failed container=init-clone-k8s-infra pod=k8s-infra-0_default(0551cf02-9396-4da7-9755-0808f195d509)
-        reason: CrashLoopBackOff
-  phase: Pending
-  podIP: 10.1.0.73
-  podIPs:
-  - ip: 10.1.0.73
-  qosClass: Burstable
-  startTime: "2022-03-26T22:23:23Z"
-#+end_src
-
-#+begin_src shell
-kubectl get service k8s-infra
-#+end_src
-
-#+RESULTS:
-#+begin_example
-NAME        TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)    AGE
-k8s-infra   ClusterIP   10.109.11.112   <none>        5432/TCP   45s
-#+end_example
-
-#+begin_src shell
-kubectl get secrets --selector application=spilo
-#+end_src
-
-#+RESULTS:
-#+begin_example
-NAME                                                       TYPE     DATA   AGE
-ii.k8s-infra.credentials.postgresql.acid.zalan.do          Opaque   2      3m17s
-k8s-infra.k8s-infra.credentials.postgresql.acid.zalan.do   Opaque   2      3m17s
-postgres.k8s-infra.credentials.postgresql.acid.zalan.do    Opaque   2      3m17s
-standby.k8s-infra.credentials.postgresql.acid.zalan.do     Opaque   2      3m16s
-#+end_example
-
-#+begin_src shell
-kubectl get secret ii.k8s-infra.credentials.postgresql.acid.zalan.do -o yaml
-#+end_src
-
-#+RESULTS:
-#+begin_example
-apiVersion: v1
-data:
-  password: MVg4MDBqUGxERGE1V1UzbDdNcDgzRU1namYwZUM0R2w3bWVkNHhZSndUS2FsbGR4Y0Z2UThXQlNTeVl5ZjVNMQ==
-  username: aWk=
-kind: Secret
-metadata:
-  creationTimestamp: "2022-03-26T03:42:33Z"
-  labels:
-    application: spilo
-    cluster-name: k8s-infra
-    team: k8s
-  name: ii.k8s-infra.credentials.postgresql.acid.zalan.do
-  namespace: infrasnoop
-  resourceVersion: "6018"
-  uid: 4fb8a6f8-8f76-4f58-a9ed-7df884007626
-type: Opaque
-#+end_example
-
-* psql
-#+begin_src tmate :session psql :window psql
-export PGPASSWORD=$(kubectl get secret ii.acid-minimal-cluster.credentials -o 'jsonpath={.data.password}' | base64 -d)
-export PGSSLMODE=require
-#+end_src
-* service account
-#+begin_src shell
-#  ii-k8s-infra@ii-coop.iam.gserviceaccount.com
-kubectl delete secret generic ii-k8s-infra-sa-key || true
-kubectl create secret generic ii-k8s-infra-sa-key --from-file ii-service-account.json
-#+end_src
-
-#+RESULTS:
-#+begin_example
-secret/ii-k8s-infra-sa-key created
-#+end_example
-
-#+begin_src shell
-gcloud auth activate-service-account ii-k8s-infra@ii-coop.iam.gserviceaccount.com --key-file ii-coop-34066a7d42cc.json
-#+end_src
-* next steps
-#+begin_src shell
-bq query -q --nouse_cache --max_rows 99999999 --format prettyjson --nouse_legacy_sql "select job, path, number,started from k8s-gubernator.build.all where result = 'SUCCESS' qualify ROW_NUMBER() OVER(PARTITION BY job ORDER BY number desc) = 1;" > latest_successful_jobs.json
-#+end_src
-#+begin_src
-cat latest_successful_jobs.json | jq -r '.[] | .path + "/**"' | xargs -L 100 -P 16 gsutil  ls -la > job_logs.txt
-#+end_src

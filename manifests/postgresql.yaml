@@ -15,10 +15,10 @@ metadata:
 spec:
   resources:
     requests:
-      cpu: 1
+      cpu: "1"
       memory: 500M
     limits:
-      cpu: 5
+      cpu: "5"
       memory: 5G
   # enableConnectionPooler: true
   # connectionPooler:
@@ -110,7 +110,8 @@ spec:
           # This takes a couple minutes
           bq query -q --nouse_cache --max_rows 99999999 --format prettyjson --nouse_legacy_sql \
             "select job,path,number,started from k8s-gubernator.build.all where result = 'SUCCESS' qualify ROW_NUMBER() OVER(PARTITION BY job ORDER BY number desc) = 1;" \
-             > latest_successful_jobs.json
+             > bq_latest_successful_jobs.json
+          cat bq_latest_successful_jobs.json | jq -cr '.[]' > latest_successful_jobs.json
           ls -la .
       volumeMounts:
         - name: empty
@@ -134,7 +135,7 @@ spec:
           gcloud auth activate-service-account --key-file $GOOGLE_APPLICATION_CREDENTIALS
           # This takes a few minutes, results are roughly 120MB
           cat latest_successful_jobs.json \
-            | jq -r '.[] | .path + "/**"' \
+            | jq -r '. | .path + "/**"' \
             | xargs -L 100 -P 16 gsutil ls -l \
             | grep -v "TOTAL:" \
             | sed "s/^ *//" \
@@ -146,11 +147,11 @@ spec:
       # this job can get pretty beefy
       resources:
         requests:
-          cpu: 1
-          memory: 500M
+          cpu: "1"
+          memory: "500M"
         limits:
-          cpu: 10
-          memory: 5G
+          cpu: "10"
+          memory: "5G"
       volumeMounts:
         - name: empty
           mountPath: /workspace
