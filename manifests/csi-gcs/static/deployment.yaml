@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: k8s-public-test
+spec:
+  template:
+    spec:
+      containers:
+        - name: reader
+          image: busybox
+          command:
+            - sleep
+            - infinity
+          volumeMounts:
+            - name: kubernetes-jenkins
+              mountPath: /gs/kubernetes-jenkins
+              readOnly: true
+      volumes:
+        - name: kubernetes-jenkins
+          persistentVolumeClaim:
+            claimName: kubernetes-jenkins

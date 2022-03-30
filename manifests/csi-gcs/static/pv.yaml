@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: kubernetes-jenkins
+spec:
+  accessModes:
+    - ReadOnlyMany
+  capacity:
+    storage: 5Gi
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: csi-gcs
+  csi:
+    driver: gcs.csi.ofek.dev
+    volumeHandle: kubernetes-jenkins
+    nodePublishSecretRef:
+      name: csi-gcs-secret
+      namespace: default
+    volumeAttributes:
+      gid: "63147"
+      dirMode: "0775"
+      fileMode: "0664"
+      implicitDirs: "true"
