@@ -1,22 +1,22 @@
 ## -*- mode: python -*-
+load('ext://ko', 'ko_build')
+load('ext://namespace', 'namespace_create','namespace_inject')
+namespace_create('infrasnoop')
+# In pair:
 allow_k8s_contexts('kubernetes-admin@'+os.environ['SHARINGIO_PAIR_NAME'])
 # Update k8s-infra:postgresql:infrasnoop ko-local/infrasnoop
-k8s_kind('postgresql', image_json_path='{.spec.initContainers[*].image}')
-load('ext://ko', 'ko_build')
+# it's embedded within the postgresql crd object
+k8s_kind('postgresql',
+         image_json_path='{.spec.initContainers[*].image}')
 ko_build('ko-local/infrasnoop',
          '.',
          deps=['./main.go', './go.mod', './go.sum'],
          live_update=[],
          )
 
-k8s_yaml('./manifests/namespaces.yaml')
-k8s_yaml(local('curl -L -s https://github.com/zalando/postgres-operator/raw/master/charts/postgres-operator/crds/operatorconfigurations.yaml'))
-k8s_yaml(local('helm template postgres-operator -n postgres-operator https://raw.githubusercontent.com/zalando/postgres-operator/master/charts/postgres-operator/postgres-operator-1.7.1.tgz'))
-k8s_yaml(local('kubectl -n infrasnoop create secret generic ii-k8s-infra-sa-key --from-file ii-service-account.json --dry-run=client -o yaml'))
-k8s_resource(workload='postgres-operator',objects=['operatorconfigurations.acid.zalan.do:CustomResourceDefinition:default','postgres-operator:OperatorConfiguration:postgres-operator'])
-# Requires that postgresql-operator is actually deployed... not sure if we can delay a bit somehow
-k8s_resource('k8s-infra',resource_deps=['postgres-operator'])
-# local('sleep 5 && kubectl wait --for condition=established --timeout=60s crd/postgresqls.acid.zalan.do')
-k8s_yaml('./manifests/postgresql.yaml') # CRD CReates
-# Need to access the image at least once in order for it to build
-# k8s_yaml('./manifests/infrasnoop-job.yaml') # PATCHED
+k8s_yaml(namespace_inject(
+    read_file('./manifests/postgresql.yaml'),
+    'infrasnoop')) # CRD CReates
+k8s_yaml(namespace_inject(
+    local('kubectl -n infrasnoop create secret generic ii-k8s-infra-sa-key --from-file ii-service-account.json --dry-run=client -o yaml'),
+    'infrasnoop'))

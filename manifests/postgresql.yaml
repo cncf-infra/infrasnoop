@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Secret
 metadata:
-  name: infrasnoop.k8s-infra.credentials.postgresql.acid.zalan.do
+  name: infrasnoop.infra-db.credentials.postgresql.acid.zalan.do
   namespace: infrasnoop
 stringData:
   username: infrasnoop
@@ -10,7 +10,7 @@ stringData:
 apiVersion: "acid.zalan.do/v1"
 kind: postgresql
 metadata:
-  name: k8s-infra
+  name: infra-db
   namespace: infrasnoop
 spec:
   # enableConnectionPooler: true
@@ -23,7 +23,7 @@ spec:
   #     limits:
   #       cpu: "1"
   #       memory: 100Mi
-  teamId: "k8s"
+  teamId: "infra"
   volume:
     size: 20Gi
   numberOfInstances: 1
