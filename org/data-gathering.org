@@ -200,7 +200,7 @@ number text,
 started timestamp
 );
 
-comment on table successful_jobs 'prow jobs that have finished successfully, according to bq';
+comment on table successful_jobs is 'prow jobs that have finished successfully, according to bq';
 comment on column successful_jobs.id is 'generated automatically, unique id for row';
 comment on column successful_jobs.job is 'the prow job name';
 comment on column successful_jobs.number is 'the number of this job run. Goes up incrementally';
@@ -233,7 +233,7 @@ comment on table job_gcs_output is 'the path and size of resulting files from a 
 comment on column job_gcs_output.size is 'size of the file in bytes';
 comment on column job_gcs_output.time is 'time file was added';
 comment on column job_gcs_output.path is 'full filepath, should be unique';
-comment on column job_gcs_output.job_id is 'reference to the job in successful_jobs table';
+-- comment on column job_gcs_output.job_id is 'reference to the job in successful_jobs table';
 
 create unique index output_path_idx on job_gcs_output(path);
 #+end_src
@@ -242,7 +242,7 @@ create unique index output_path_idx on job_gcs_output(path);
 A combined materialized view of job results and output, based on successful jobs in the last 30 days
 
 #+NAME: Define recent_jobs
-#+begin_src sql-mode
+#+begin_src sql-mode :results silent
 begin;
 create materialized view recent_jobs as
 select
