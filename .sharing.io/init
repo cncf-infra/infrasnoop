@@ -1,0 +1,24 @@
+#!/bin/bash
+cd $(dirname $0)
+GIT_ROOT=$(git rev-parse --show-toplevel)
+cd $GIT_ROOT
+
+# install postgres-operator
+kubectl create namespace postgres-operator --dry-run=client -o yaml | kubectl apply -f -
+kubectl apply -f https://github.com/zalando/postgres-operator/raw/master/charts/postgres-operator/crds/operatorconfigurations.yaml
+helm template postgres-operator -n postgres-operator https://raw.githubusercontent.com/zalando/postgres-operator/master/charts/postgres-operator/postgres-operator-1.7.1.tgz | kubectl apply -f -
+
+# Install gcs-gcs
+kubectl apply -k "github.com/ofek/csi-gcs/deploy/overlays/stable"
+
+
+# setup tmate
+tmate -F -v -S $TMATE_SOCKET new-window -d -c "$PWD" -n infrasnoop-tilt bash
+tmate -S $TMATE_SOCKET send-keys -t infrasnoop-tilt "tilt up --host 0.0.0.0 --legacy" Enter
+
+tmate -F -v -S $TMATE_SOCKET new-window -d -c "$PWD" -n infra-db-events bash
+tmate -S $TMATE_SOCKET send-keys -t infra-db-events "kubectl get event -w --field-selector involvedObject.name=infra-db-0" Enter
+# kubectl events!
+
+# focus on infrasnoop
+kubectl config set-context --current --namespace=infrasnoop
