@@ -1,26 +1,41 @@
 #+TITLE: ii
-
-* Reconfigure ORG with k8s-cluster PGUSER+PGPASSWORD
-#+begin_src emacs-lisp :noweb yes :results silent
-(setenv "PGUSER" (shell-command-to-string "kubectl -n infrasnoop get secrets k8s-infra.k8s-infra.credentials.postgresql.acid.zalan.do -o go-template='{{ .data.username | base64decode }}'"))
-(setenv "PGPASSWORD" (shell-command-to-string "kubectl -n infrasnoop get secrets k8s-infra.k8s-infra.credentials.postgresql.acid.zalan.do -o go-template='{{ .data.password | base64decode }}'"))
-(reconfigure-org)
+* ensure postgres operator is deployed
+#+begin_src shell :results silent
+kubectl create namespace postgres-operator --dry-run=client -o yaml | kubectl apply -f -
+kubectl apply -f https://github.com/zalando/postgres-operator/raw/master/charts/postgres-operator/crds/operatorconfigurations.yaml
+helm template postgres-operator -n postgres-operator https://raw.githubusercontent.com/zalando/postgres-operator/master/charts/postgres-operator/postgres-operator-1.7.1.tgz | kubectl apply -f -
 #+end_src
 
-
+* tilt
+#+begin_src tmate :window tilt
+cdr
+kubectl config set-context --current --namespace=infrasnoop
+tilt up --legacy --host 0.0.0.0
+#+end_src
+* namespace
+#+begin_src shell :results none
+kubectl config set-context --current --namespace=infrasnoop
+#+end_src
+* monitoring infra-db
+* connect
 #+begin_src sql-mode
 select 1;
 #+end_src
 
-* namespace
-#+begin_src shell :results none
-kubectl create ns infrasnoop || true
-kubectl config set-context --current --namespace=infrasnoop
+#+RESULTS:
+#+begin_SRC example
+ ?column?
+----------
+        1
+(1 row)
+
+#+end_SRC
+* retrieve working files
+#+begin_src shell
+kubectl cp -c postgres infra-db-0:/workspace/latest_successful_jobs.json .
+kubectl cp -c postgres infra-db-0:/workspace/ .
 #+end_src
-* tilt
-#+begin_src tmate :session tilt :window tilt
-tilt up --legacy
-#+end_src
+
 * psql-ui
 Might revisit this
 #+begin_src tmate :session tilt :window fwd-psql-ui
