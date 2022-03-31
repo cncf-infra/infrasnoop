@@ -93,6 +93,36 @@ spec:
       volumeMounts:
         - mountPath: /workspace
           name: empty
+    - name: init-dump-testgrid-config
+      image: gcr.io/k8s-prow/configurator:v20220330-40eb179576
+      workingDir: /workspace/test-infra
+      command:
+        - /bin/sh
+        - -c
+        - |
+          configurator \
+            --yaml=config/testgrids \
+            --default=config/testgrids/default.yaml \
+            --prow-config=config/prow/config.yaml \
+            --prow-job-config=config/jobs/ \
+            --prowjob-url-prefix=https://git.k8s.io/test-infra/config/jobs/ \
+            --update-description \
+            --oneshot \
+            --world-readable \
+            --output-yaml \
+            --output=/workspace/testgrid-config.yaml
+          # install yq
+          wget https://github.com/mikefarah/yq/releases/download/v4.24.2/yq_linux_amd64 -O /usr/bin/yq &&\
+          chmod +x /usr/bin/yq
+          # Generate testgrid-config.json
+          cd /workspace
+          cat testgrid-config.yaml | yq -o=json > testgrid-config.json
+      volumeMounts:
+        - mountPath: /workspace
+          name: empty
+      resources:
+        requests:
+          memory: "1Gi"
     - name: init-dump-k8s-gubernator
       # this dumps the latest successful jobs from the gubernator BigQuery DB
       image: google/cloud-sdk:378.0.0
