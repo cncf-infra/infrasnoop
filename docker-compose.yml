@@ -1,0 +1,12 @@
+version: '3'
+services:
+  postgress-postgresql:
+    image: infrasnoop:latest
+    volumes:
+      - ./initdb:/docker-entrypoint-initdb.d/
+      - ./data:/data
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=infra
+    ports:
+      - 5432:5432
