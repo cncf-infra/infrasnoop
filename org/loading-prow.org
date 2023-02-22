@@ -1,0 +1,219 @@
+#+title: Loading Prow
+#+PROPERTY: header-args:sql-mode+ :product postgres
+
+
+* Ask
+We need a json based table of prow job yaml (from the test-infra repo) with a secondary table with data pulled in from the running prow cluster.
+
+Combined we should be able the
+job-name, job-github-url, job definition data (from within the url, we'll pick as we go), job result data (from the ruling prow instance)
+
+Ideally we can determine job:
+- name
+- github-url
+- definition (this is mostly what we cherry pick from GitHub yaml to jsonb)
+- owning sig (from owners-file for github-url)
+- time to run (from prow.k8s.io search with job)
+- recent success log text : #prow-k8s-io
+- recent failure log text : #prow-k8s-io
+- If the job creates clusters
+  - (based on if logs show cluster creation, and possible other parts)
+  - and IF it creates clusters, have we configured it to run Kubecost YET (Likely something we add to the labels of the job)
+
+Docs for jobs here:
+- https://docs.prow.k8s.io/docs/jobs/
+SRC Yaml files here:
+- https://github.com/kubernetes/test-infra/tree/master/config/jobs
+Living Results of jobs here:
+- https://prow.k8s.io
+* Strategy
+These should all be codified into steps in the initdb for infrasnoop
+** STRT [0/3] JOBS
+*** TODO Get the data as a json in the data folder
+I did this using prowfetch.clj, a small babashka script. This lets me re-use functionality, and quickly add in the metadata
+we needed like the filename, the ref, and the branch.
+the relevant code is
+#+begin_src clojure
+(defn yamls->json
+  "Given a set of yaml file names from a repo, create a json string with the file's data and metadata"
+  [files]
+  (map
+   #(json/generate-string
+    (assoc {}
+           :repo "kubernetes/test-infra"
+           :head (second ref-branch)
+           :ref (first ref-branch)
+           :file %
+           :data (yaml/parse-string (slurp %))))
+   files))
+
+(defn files->json
+  "Find all files in path matching glob, concatenate them into one big json, and spit that json to the given outfile.
+   The files are assumed to be yaml."
+  [path glob outfile]
+  (->> (fs/glob path glob)
+       (map str)
+       yamls->json
+       (str/join ",")
+       (format "[%s]")
+       (spit outfile)))
+
+(files->json "./test-infra/config/jobs/" "**.yaml" "prow-jobs.json")
+(files->json "./test-infra/" "**OWNERS" "owners.json")
+#+end_src
+*** TODO make a prow.jobs table and load it with data
+after updating the dockerfile and the first initscript to use this prowfetch
+script, i should be able to interact with the db and load up the files in /data.
+
+
+#+begin_src sql-mode
+begin;
+create table prow.job(
+  id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  repo text,
+  head text,
+  ref text,
+  file text,
+  data jsonb
+);
+
+create temp table prow_job_raw(data jsonb);
+\copy prow_job_raw from '../data/prow-jobs.json' csv quote e'\x01' delimiter e'\x02';
+
+insert into prow.job(repo,head,ref,file,data)
+            (select p->>'repo',
+                    p->>'head',
+                    p->>'ref',
+                    p->>'file',
+                    p->'data'
+               from prow_job_raw raw,
+                    jsonb_array_elements(raw.data) p);
+drop table prow_job_raw;
+select count(*) from prow.job;
+rollback;
+#+end_src
+
+#+RESULTS:
+#+begin_example
+BEGIN
+postgres=*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# CREATE TABLE
+postgres=*# postgres=*# CREATE TABLE
+postgres=*# COPY 1
+postgres=*# postgres=*# postgres-*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# INSERT 0 448
+postgres=*# DROP TABLE
+postgres=*#  count
+-------
+   448
+(1 row)
+
+postgres=*# ROLLBACK
+#+end_example
+
+looking good. I'll break this into two files loaded into the initdb.
+*** TODO Add work to initdb and test it workd
+I created two files ~105_prow_job_table.sql~ and ~504_load_prow_jobs.sql~ in our initdb from the above work.
+
+I then restarted the container.  If it works, I should be able to get some already present info from an already made table
+
+#+begin_src sql-mode :results output
+select ref, file, jsonb_object_keys(data)
+  from prow.job limit 5;
+#+end_src
+
+#+RESULTS:
+:                    ref                    |                                         file                                          | jsonb_object_keys
+: ------------------------------------------+---------------------------------------------------------------------------------------+-------------------
+:  2da1f1fbc7447b1bf1faf4eea5ce55d5dca11a28 | test-infra/config/jobs/GoogleCloudPlatform/k8s-cluster-bundle/k8s-cluster-bundle.yaml | presubmits
+:  2da1f1fbc7447b1bf1faf4eea5ce55d5dca11a28 | test-infra/config/jobs/GoogleCloudPlatform/k8s-cluster-bundle/k8s-cluster-bundle.yaml | postsubmits
+:  2da1f1fbc7447b1bf1faf4eea5ce55d5dca11a28 | test-infra/config/jobs/bazelbuild/rules_k8s/rules_k8s_config.yaml                     | presubmits
+:  2da1f1fbc7447b1bf1faf4eea5ce55d5dca11a28 | test-infra/config/jobs/cadvisor/cadvisor.yaml                                         | presets
+:  2da1f1fbc7447b1bf1faf4eea5ce55d5dca11a28 | test-infra/config/jobs/cadvisor/cadvisor.yaml                                         | periodics
+: (5 rows)
+:
+
+sweet!
+
+** TODO [0/3] OWNERS
+*** TODO Get the data as a json in the data folder
+Same as prow.job, using prowfetch.clj
+*** TODO make a prow.owners table and load it with data
+after updating the dockerfile and the first initscript to use this prowfetch
+script, i should be able to interact with the db and load up the files in /data.
+
+
+#+begin_src sql-mode
+begin;
+create table prow.owners(
+  id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  repo text,
+  head text,
+  ref text,
+  file text,
+  data jsonb
+);
+
+create temp table prow_owners_raw(data jsonb);
+\copy prow_owners_raw from '../data/owners.json' csv quote e'\x01' delimiter e'\x02';
+
+insert into prow.owners(repo,head,ref,file,data)
+            (select p->>'repo',
+                    p->>'head',
+                    p->>'ref',
+                    p->>'file',
+                    p->'data'
+               from prow_owners_raw raw,
+                    jsonb_array_elements(raw.data) p);
+drop table prow_owners_raw;
+select count(*) from prow.owners;
+rollback;
+#+end_src
+
+#+RESULTS:
+#+begin_example
+BEGIN
+postgres=*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# CREATE TABLE
+postgres=*# postgres=*# CREATE TABLE
+postgres=*# COPY 1
+postgres=*# postgres=*# postgres-*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# INSERT 0 267
+postgres=*# DROP TABLE
+postgres=*#  count
+-------
+   267
+(1 row)
+
+postgres=*# ROLLBACK
+#+end_example
+
+Now, convert this to init scripts
+*** TODO Add work to initdb and test it workd
+I created two files ~106_prow_owners_table.sql~ and ~505_load_prow_owners.sql~ in our initdb from the above work.
+
+I then restarted the container.  If it works, I should be able to get some already present info from an already made table
+
+#+begin_src sql-mode :results output
+select ref, file, jsonb_object_keys(data)
+  from prow.job limit 5;
+#+end_src
+
+#+RESULTS:
+:                    ref                    |                                         file                                          | jsonb_object_keys
+: ------------------------------------------+---------------------------------------------------------------------------------------+-------------------
+:  2da1f1fbc7447b1bf1faf4eea5ce55d5dca11a28 | test-infra/config/jobs/GoogleCloudPlatform/k8s-cluster-bundle/k8s-cluster-bundle.yaml | presubmits
+:  2da1f1fbc7447b1bf1faf4eea5ce55d5dca11a28 | test-infra/config/jobs/GoogleCloudPlatform/k8s-cluster-bundle/k8s-cluster-bundle.yaml | postsubmits
+:  2da1f1fbc7447b1bf1faf4eea5ce55d5dca11a28 | test-infra/config/jobs/bazelbuild/rules_k8s/rules_k8s_config.yaml                     | presubmits
+:  2da1f1fbc7447b1bf1faf4eea5ce55d5dca11a28 | test-infra/config/jobs/cadvisor/cadvisor.yaml                                         | presets
+:  2da1f1fbc7447b1bf1faf4eea5ce55d5dca11a28 | test-infra/config/jobs/cadvisor/cadvisor.yaml                                         | periodics
+: (5 rows)
+:
+
+sweet!
+
+
+- [ ] Get the data as a json in the data folder
+  I did this using the prowfetch.clj file
+- [X] for above repo
+- [ ] find config/jobs \OWNERS\* | > json
+- [ ] Load json into owners table, keeping track of the src code folder the yaml from
+- [ ] find way to connect job to owners
+** TODO [0/1] DECK
+- [ ] load deck json (20k)
