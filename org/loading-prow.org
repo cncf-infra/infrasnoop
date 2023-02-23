@@ -28,8 +28,8 @@ Living Results of jobs here:
 - https://prow.k8s.io
 * Strategy
 These should all be codified into steps in the initdb for infrasnoop
-** STRT [0/3] JOBS
-*** TODO Get the data as a json in the data folder
+** DONE [3/3] JOBS
+*** DONE Get the data as a json in the data folder
 I did this using prowfetch.clj, a small babashka script. This lets me re-use functionality, and quickly add in the metadata
 we needed like the filename, the ref, and the branch.
 the relevant code is
@@ -61,14 +61,14 @@ the relevant code is
 (files->json "./test-infra/config/jobs/" "**.yaml" "prow-jobs.json")
 (files->json "./test-infra/" "**OWNERS" "owners.json")
 #+end_src
-*** TODO make a prow.jobs table and load it with data
+*** DONE make a prow.jobs table and load it with data
 after updating the dockerfile and the first initscript to use this prowfetch
 script, i should be able to interact with the db and load up the files in /data.
 
 
 #+begin_src sql-mode
 begin;
-create table prow.job(
+create table prow.job_raw(
   id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   repo text,
   head text,
@@ -77,19 +77,19 @@ create table prow.job(
   data jsonb
 );
 
-create temp table prow_job_raw(data jsonb);
-\copy prow_job_raw from '../data/prow-jobs.json' csv quote e'\x01' delimiter e'\x02';
+create temp table prow_job_import(data jsonb);
+\copy prow_job_import from '../data/prow-jobs.json' csv quote e'\x01' delimiter e'\x02';
 
-insert into prow.job(repo,head,ref,file,data)
+insert into prow.job_raw(repo,head,ref,file,data)
             (select p->>'repo',
                     p->>'head',
                     p->>'ref',
                     p->>'file',
                     p->'data'
-               from prow_job_raw raw,
-                    jsonb_array_elements(raw.data) p);
-drop table prow_job_raw;
-select count(*) from prow.job;
+               from prow_job_import imp,
+                    jsonb_array_elements(imp.data) p);
+drop table prow_job_import;
+select count(*) from prow.job_raw;
 rollback;
 #+end_src
 
@@ -106,11 +106,11 @@ postgres=*#  count
    448
 (1 row)
 
-postgres=*# ROLLBACK
+postgres=*# COMMIT
 #+end_example
 
 looking good. I'll break this into two files loaded into the initdb.
-*** TODO Add work to initdb and test it workd
+*** DONE Add work to initdb and test it workd
 I created two files ~105_prow_job_table.sql~ and ~504_load_prow_jobs.sql~ in our initdb from the above work.
 
 I then restarted the container.  If it works, I should be able to get some already present info from an already made table
@@ -133,27 +133,583 @@ select ref, file, jsonb_object_keys(data)
 
 sweet!
 
-** TODO [0/3] OWNERS
-*** TODO Get the data as a json in the data folder
-Same as prow.job, using prowfetch.clj
-*** TODO make a prow.owners table and load it with data
-after updating the dockerfile and the first initscript to use this prowfetch
-script, i should be able to interact with the db and load up the files in /data.
+** Get a jobs view
+this should have the name of each job, taken from it's object in the yaml.
+the job will either be under the presubmit, postsubmit, or periodics headings.
+
+#+begin_src sql-mode
+with keylist as (
+  select file,
+         array(select jsonb_object_keys(data)) keys
+    from prow.job_raw
+)
+select file, keys
+  from keylist
+ where array_length(keys,1) > 2
+ limit 5;
+#+end_src
+
+#+RESULTS:
+:                                                  file                                                 |                keys
+: ------------------------------------------------------------------------------------------------------+------------------------------------
+:  test-infra/config/jobs/kubernetes-sigs/secrets-store-csi-driver/secrets-store-csi-driver-config.yaml | {periodics,presubmits,postsubmits}
+:  test-infra/config/jobs/kubernetes/sig-release/release-branch-jobs/1.23.yaml                          | {periodics,presubmits,postsubmits}
+:  test-infra/config/jobs/kubernetes/sig-release/release-branch-jobs/1.25.yaml                          | {periodics,presubmits,postsubmits}
+:  test-infra/config/jobs/kubernetes/sig-release/release-branch-jobs/1.24.yaml                          | {periodics,presubmits,postsubmits}
+:  test-infra/config/jobs/kubernetes/sig-release/release-branch-jobs/1.26.yaml                          | {periodics,presubmits,postsubmits}
+: (5 rows)
+:
+
+Cool, the sig-release release branch file could be a good test, as it has all three types.
+** presubmits
+The presubmits are structured as keys, and then within each key is a list of the jobs
+
+#+begin_src sh
+cat  ../data/test-infra/config/jobs/kubernetes/sig-release/release-branch-jobs/1.26.yaml | yq . | jq '.presubmits | keys'
+#+end_src
+
+#+RESULTS:
+| [                     |
+| kubernetes/kubernetes |
+| kubernetes/perf-tests |
+| ]                     |
+
+for each of the keys in there, there'll be a list of jobs.  how many?
+
+#+begin_src sh
+cat  ../data/test-infra/config/jobs/kubernetes/sig-release/release-branch-jobs/1.26.yaml \
+| yq . \
+| jq '.presubmits."kubernetes/kubernetes" | .[].name'
+#+end_src
+
+#+RESULTS:
+| pull-kubernetes-e2e-kops-aws                      |
+| pull-kubernetes-e2e-gce                           |
+| pull-kubernetes-e2e-gce-canary                    |
+| pull-kubernetes-e2e-gce-ubuntu-containerd         |
+| pull-kubernetes-e2e-gce-ubuntu-containerd-canary  |
+| pull-kubernetes-e2e-gce-ubuntu-containerd-serial  |
+| pull-e2e-gce-cloud-provider-disabled              |
+| pull-kubernetes-e2e-gce-device-plugin-gpu         |
+| pull-kubernetes-verify-govet-levee                |
+| pull-kubernetes-e2e-containerd-gce                |
+| pull-kubernetes-node-e2e-containerd               |
+| pull-kubernetes-node-e2e-containerd-kubetest2     |
+| pull-kubernetes-e2e-gce-100-performance           |
+| pull-kubernetes-kubemark-e2e-gce-big              |
+| pull-kubernetes-kubemark-e2e-gce-scale            |
+| pull-kubernetes-conformance-kind-ipv6-parallel    |
+| pull-kubernetes-dependencies                      |
+| pull-kubernetes-integration                       |
+| pull-kubernetes-integration-go-compatibility      |
+| pull-kubernetes-e2e-kind                          |
+| pull-kubernetes-e2e-kind-ipv6                     |
+| pull-kubernetes-conformance-kind-ga-only-parallel |
+| pull-kubernetes-unit                              |
+| pull-kubernetes-unit-go-compatibility             |
+| pull-kubernetes-typecheck                         |
+| pull-kubernetes-update                            |
+| pull-kubernetes-verify                            |
+
+#+begin_src sh
+cat  ../data/test-infra/config/jobs/kubernetes/sig-release/release-branch-jobs/1.26.yaml \
+| yq . \
+| jq '.presubmits."kubernetes/perf-tests" | .[].name'
+#+end_src
+
+#+RESULTS:
+| pull-perf-tests-clusterloader2          |
+| pull-perf-tests-clusterloader2-kubemark |
+
+there are *28* jobs within the presubmits.  So if we do this right, we should have 28 rows.
+
+#+begin_src sql-mode
+with presubmit as (
+  select file,
+         presubmits.key as presubmit_key,
+         prejob->>'name' job,
+         'presubmit' as job_type
+    from prow.job_raw raw
+         , jsonb_each(raw.data -> 'presubmits') presubmits(key, value)
+         , jsonb_array_elements(presubmits.value) prejob
+)
+select
+  presubmit_key,job,job_type
+  from presubmit
+ where file = 'test-infra/config/jobs/kubernetes/sig-release/release-branch-jobs/1.26.yaml';
+#+end_src
+
+#+RESULTS:
+#+begin_example
+     presubmit_key     |                        job                        | job_type
+-----------------------+---------------------------------------------------+-----------
+ kubernetes/kubernetes | pull-kubernetes-e2e-kops-aws                      | presubmit
+ kubernetes/kubernetes | pull-kubernetes-e2e-gce                           | presubmit
+ kubernetes/kubernetes | pull-kubernetes-e2e-gce-canary                    | presubmit
+ kubernetes/kubernetes | pull-kubernetes-e2e-gce-ubuntu-containerd         | presubmit
+ kubernetes/kubernetes | pull-kubernetes-e2e-gce-ubuntu-containerd-canary  | presubmit
+ kubernetes/kubernetes | pull-kubernetes-e2e-gce-ubuntu-containerd-serial  | presubmit
+ kubernetes/kubernetes | pull-e2e-gce-cloud-provider-disabled              | presubmit
+ kubernetes/kubernetes | pull-kubernetes-e2e-gce-device-plugin-gpu         | presubmit
+ kubernetes/kubernetes | pull-kubernetes-verify-govet-levee                | presubmit
+ kubernetes/kubernetes | pull-kubernetes-e2e-containerd-gce                | presubmit
+ kubernetes/kubernetes | pull-kubernetes-node-e2e-containerd               | presubmit
+ kubernetes/kubernetes | pull-kubernetes-node-e2e-containerd-kubetest2     | presubmit
+ kubernetes/kubernetes | pull-kubernetes-e2e-gce-100-performance           | presubmit
+ kubernetes/kubernetes | pull-kubernetes-kubemark-e2e-gce-big              | presubmit
+ kubernetes/kubernetes | pull-kubernetes-kubemark-e2e-gce-scale            | presubmit
+ kubernetes/kubernetes | pull-kubernetes-conformance-kind-ipv6-parallel    | presubmit
+ kubernetes/kubernetes | pull-kubernetes-dependencies                      | presubmit
+ kubernetes/kubernetes | pull-kubernetes-integration                       | presubmit
+ kubernetes/kubernetes | pull-kubernetes-integration-go-compatibility      | presubmit
+ kubernetes/kubernetes | pull-kubernetes-e2e-kind                          | presubmit
+ kubernetes/kubernetes | pull-kubernetes-e2e-kind-ipv6                     | presubmit
+ kubernetes/kubernetes | pull-kubernetes-conformance-kind-ga-only-parallel | presubmit
+ kubernetes/kubernetes | pull-kubernetes-unit                              | presubmit
+ kubernetes/kubernetes | pull-kubernetes-unit-go-compatibility             | presubmit
+ kubernetes/kubernetes | pull-kubernetes-typecheck                         | presubmit
+ kubernetes/kubernetes | pull-kubernetes-update                            | presubmit
+ kubernetes/kubernetes | pull-kubernetes-verify                            | presubmit
+ kubernetes/perf-tests | pull-perf-tests-clusterloader2                    | presubmit
+ kubernetes/perf-tests | pull-perf-tests-clusterloader2-kubemark           | presubmit
+(29 rows)
+
+#+end_example
+** periodics
+Periodics is an array, and doesn't have that key grouping like presubmits
+#+begin_src sh
+cat '../data/test-infra/config/jobs/kubernetes/sig-release/release-branch-jobs/1.26.yaml' \
+| yq . \
+| jq '.periodics | length'
+#+end_src
+
+#+RESULTS:
+: 11
+
+#+begin_src sql-mode
+with periodic as (
+  select file,
+         p->>'name' as job,
+         'periodic' as job_type
+    from prow.job_raw raw
+         , jsonb_array_elements(raw.data -> 'periodics') p
+)
+select
+  job,job_type
+  from periodic
+ where file = 'test-infra/config/jobs/kubernetes/sig-release/release-branch-jobs/1.26.yaml';
+#+end_src
+
+#+RESULTS:
+#+begin_example
+                     job                      | job_type
+----------------------------------------------+----------
+ ci-kubernetes-gce-conformance-latest-1-26    | periodic
+ ci-kubernetes-e2e-gce-device-plugin-gpu-1-26 | periodic
+ ci-kubernetes-kind-e2e-json-logging-1-26     | periodic
+ ci-kubernetes-build-1-26                     | periodic
+ ci-kubernetes-kubemark-500-gce-1-26          | periodic
+ ci-kubernetes-e2e-gci-gce-scalability-1-26   | periodic
+ ci-kubernetes-integration-1-26               | periodic
+ ci-kubernetes-unit-1-26                      | periodic
+ ci-kubernetes-verify-1-26                    | periodic
+ ci-kubernetes-kind-e2e-parallel-1-26         | periodic
+ ci-kubernetes-kind-ipv6-e2e-parallel-1-26    | periodic
+(11 rows)
+
+#+end_example
+
+We can join these tables then with a union.  This should give us 28+11, or 39 results.  Or 40 rows including the header row.
+
+#+begin_src sql-mode
+with all_jobs as (
+  select file,
+         p->>'name' as job,
+         'periodic' as job_type,
+         null as key
+    from prow.job_raw raw
+         , jsonb_array_elements(raw.data -> 'periodics') p
+    union (
+      select file,
+             prejob->>'name' job,
+             'presubmit' as job_type,
+             presubmits.key as key
+        from prow.job_raw raw
+             , jsonb_each(raw.data -> 'presubmits') presubmits(key, value)
+             , jsonb_array_elements(presubmits.value) prejob
+    )
+    )
+select job_type,job,key from all_jobs
+ where file = 'test-infra/config/jobs/kubernetes/sig-release/release-branch-jobs/1.26.yaml';
+#+end_src
+
+#+RESULTS:
+#+begin_example
+ job_type  |                        job                        |          key
+-----------+---------------------------------------------------+-----------------------
+ presubmit | pull-kubernetes-verify                            | kubernetes/kubernetes
+ periodic  | ci-kubernetes-verify-1-26                         |
+ periodic  | ci-kubernetes-kind-e2e-parallel-1-26              |
+ presubmit | pull-kubernetes-e2e-kind                          | kubernetes/kubernetes
+ periodic  | ci-kubernetes-e2e-gce-device-plugin-gpu-1-26      |
+ presubmit | pull-kubernetes-e2e-gce-100-performance           | kubernetes/kubernetes
+ presubmit | pull-kubernetes-conformance-kind-ga-only-parallel | kubernetes/kubernetes
+ presubmit | pull-kubernetes-e2e-containerd-gce                | kubernetes/kubernetes
+ presubmit | pull-kubernetes-e2e-gce                           | kubernetes/kubernetes
+ presubmit | pull-kubernetes-node-e2e-containerd-kubetest2     | kubernetes/kubernetes
+ periodic  | ci-kubernetes-e2e-gci-gce-scalability-1-26        |
+ presubmit | pull-e2e-gce-cloud-provider-disabled              | kubernetes/kubernetes
+ periodic  | ci-kubernetes-kubemark-500-gce-1-26               |
+ presubmit | pull-kubernetes-e2e-gce-ubuntu-containerd         | kubernetes/kubernetes
+ presubmit | pull-kubernetes-dependencies                      | kubernetes/kubernetes
+ presubmit | pull-kubernetes-e2e-gce-ubuntu-containerd-serial  | kubernetes/kubernetes
+ presubmit | pull-kubernetes-verify-govet-levee                | kubernetes/kubernetes
+ presubmit | pull-kubernetes-e2e-gce-ubuntu-containerd-canary  | kubernetes/kubernetes
+ presubmit | pull-kubernetes-integration-go-compatibility      | kubernetes/kubernetes
+ presubmit | pull-kubernetes-node-e2e-containerd               | kubernetes/kubernetes
+ periodic  | ci-kubernetes-integration-1-26                    |
+ periodic  | ci-kubernetes-build-1-26                          |
+ presubmit | pull-kubernetes-kubemark-e2e-gce-scale            | kubernetes/kubernetes
+ presubmit | pull-kubernetes-e2e-gce-canary                    | kubernetes/kubernetes
+ presubmit | pull-kubernetes-e2e-kops-aws                      | kubernetes/kubernetes
+ periodic  | ci-kubernetes-kind-e2e-json-logging-1-26          |
+ periodic  | ci-kubernetes-gce-conformance-latest-1-26         |
+ presubmit | pull-kubernetes-unit-go-compatibility             | kubernetes/kubernetes
+ periodic  | ci-kubernetes-unit-1-26                           |
+ periodic  | ci-kubernetes-kind-ipv6-e2e-parallel-1-26         |
+ presubmit | pull-perf-tests-clusterloader2                    | kubernetes/perf-tests
+ presubmit | pull-kubernetes-e2e-gce-device-plugin-gpu         | kubernetes/kubernetes
+ presubmit | pull-kubernetes-e2e-kind-ipv6                     | kubernetes/kubernetes
+ presubmit | pull-kubernetes-integration                       | kubernetes/kubernetes
+ presubmit | pull-perf-tests-clusterloader2-kubemark           | kubernetes/perf-tests
+ presubmit | pull-kubernetes-update                            | kubernetes/kubernetes
+ presubmit | pull-kubernetes-conformance-kind-ipv6-parallel    | kubernetes/kubernetes
+ presubmit | pull-kubernetes-unit                              | kubernetes/kubernetes
+ presubmit | pull-kubernetes-kubemark-e2e-gce-big              | kubernetes/kubernetes
+ presubmit | pull-kubernetes-typecheck                         | kubernetes/kubernetes
+(40 rows)
+
+#+end_example
+
+Looking good!
+* Postsubmits
+
+#+begin_src sh
+cat '../data/test-infra/config/jobs/kubernetes/sig-release/release-branch-jobs/1.26.yaml' \
+| yq . \
+| jq '.postsubmits | keys'
+#+end_src
+
+#+RESULTS:
+: []
+
+This doesn't have any postsubmits, but checking other files i can see they are structured same way as presubmits.
+I should be able to make the view, and then switch over to another file to double check work.
+#+begin_src sql-mode
+with all_jobs as (
+  --periodics
+  select file,
+         p->>'name' as job,
+         'periodic' as job_type,
+         null as key
+    from prow.job_raw raw
+         , jsonb_array_elements(raw.data -> 'periodics') p
+    union (
+      select file,
+             prejob->>'name' job,
+             'presubmit' as job_type,
+             presubmits.key as key
+        from prow.job_raw raw
+             , jsonb_each(raw.data -> 'presubmits') presubmits(key, value)
+             , jsonb_array_elements(presubmits.value) prejob)
+    union (
+      select file,
+             postjob->>'name' job,
+             'postsubmit' as job_type,
+             post.key as key
+        from prow.job_raw raw
+             , jsonb_each(raw.data -> 'postsubmits') post(key, value)
+             , jsonb_array_elements(post.value) postjob)
+    )
+select count(*)
+  from all_jobs
+ where file = 'test-infra/config/jobs/kubernetes/sig-release/release-branch-jobs/1.26.yaml';
+
+#+end_src
+
+#+RESULTS:
+:  count
+: -------
+:     40
+: (1 row)
+:
+
+
+* double check work
+I want to investigate another file that has all three job types:
+: test-infra/config/jobs/kubernetes-sigs/secrets-store-csi-driver/secrets-store-csi-driver-config.yaml
+
+#+begin_src sh
+cat "../data/test-infra/config/jobs/kubernetes-sigs/secrets-store-csi-driver/secrets-store-csi-driver-config.yaml" \
+    | yq . \
+    | jq ". | keys"
+#+end_src
+
+#+RESULTS:
+| [           |
+| periodics   |
+| postsubmits |
+| presubmits  |
+| ]           |
+
+#+begin_src sh
+cat "../data/test-infra/config/jobs/kubernetes-sigs/secrets-store-csi-driver/secrets-store-csi-driver-config.yaml" \
+    | yq . \
+    | jq '.presubmits."kubernetes-sigs/secrets-store-csi-driver" | length'
+#+end_src
+
+#+RESULTS:
+: 20
+20 pre jobs, and
+
+#+begin_src sh
+cat "../data/test-infra/config/jobs/kubernetes-sigs/secrets-store-csi-driver/secrets-store-csi-driver-config.yaml" \
+    | yq . \
+    | jq '.postsubmits."kubernetes-sigs/secrets-store-csi-driver" | length'
+#+end_src
+
+#+RESULTS:
+: 4
+
+4 post jobs, and
+
+#+begin_src sh
+cat "../data/test-infra/config/jobs/kubernetes-sigs/secrets-store-csi-driver/secrets-store-csi-driver-config.yaml" \
+    | yq . \
+    | jq '.periodics | length'
+#+end_src
+
+#+RESULTS:
+: 3
+
+3 periodics.  so 27 jobs in total.  let's double check
+
 
 
 #+begin_src sql-mode
+with all_jobs as (
+  --periodics
+  select file,
+         p->>'name' as job,
+         'periodic' as job_type,
+         null as key,
+         p as data
+    from prow.job_raw raw
+         , jsonb_array_elements(raw.data -> 'periodics') p
+           union (
+             select file,
+                    prejob->>'name' job,
+                    'presubmit' as job_type,
+                    presubmits.key as key,
+                    prejob as data
+               from prow.job_raw raw
+                    , jsonb_each(raw.data -> 'presubmits') presubmits(key, value)
+                    , jsonb_array_elements(presubmits.value) prejob)
+           union (
+             select file,
+                    postjob->>'name' job,
+                    'postsubmit' as job_type,
+                    post.key as key,
+                    postjob as data
+               from prow.job_raw raw
+                    , jsonb_each(raw.data -> 'postsubmits') post(key, value)
+                    , jsonb_array_elements(post.value) postjob)
+)
+select job_type,job,key
+  from all_jobs
+ where file = 'test-infra/config/jobs/kubernetes-sigs/secrets-store-csi-driver/secrets-store-csi-driver-config.yaml'
+ order by job_type;
+
+#+end_src
+
+#+RESULTS:
+#+begin_example
+  job_type  |                                 job                                 |                   key
+------------+---------------------------------------------------------------------+------------------------------------------
+ periodic   | periodic-secrets-store-csi-driver-image-scan                        |
+ periodic   | periodic-secrets-store-csi-driver-inplace-upgrade-test-e2e-provider |
+ periodic   | periodic-secrets-store-csi-driver-upgrade-test-azure                |
+ postsubmit | secrets-store-csi-driver-e2e-gcp-postsubmit                         | kubernetes-sigs/secrets-store-csi-driver
+ postsubmit | secrets-store-csi-driver-e2e-azure-postsubmit                       | kubernetes-sigs/secrets-store-csi-driver
+ postsubmit | secrets-store-csi-driver-e2e-vault-postsubmit                       | kubernetes-sigs/secrets-store-csi-driver
+ postsubmit | secrets-store-csi-driver-e2e-aws-postsubmit                         | kubernetes-sigs/secrets-store-csi-driver
+ presubmit  | pull-secrets-store-csi-driver-e2e-provider-k8s-1-23-13              | kubernetes-sigs/secrets-store-csi-driver
+ presubmit  | pull-secrets-store-csi-driver-e2e-azure                             | kubernetes-sigs/secrets-store-csi-driver
+ presubmit  | pull-secrets-store-csi-driver-e2e-deploy-manifest-azure             | kubernetes-sigs/secrets-store-csi-driver
+ presubmit  | pull-secrets-store-csi-driver-e2e-gcp                               | kubernetes-sigs/secrets-store-csi-driver
+ presubmit  | release-secrets-store-csi-driver-e2e-aws                            | kubernetes-sigs/secrets-store-csi-driver
+ presubmit  | release-secrets-store-csi-driver-e2e-vault                          | kubernetes-sigs/secrets-store-csi-driver
+ presubmit  | pull-secrets-store-csi-driver-e2e-provider-k8s-1-26-0               | kubernetes-sigs/secrets-store-csi-driver
+ presubmit  | pull-secrets-store-csi-driver-build                                 | kubernetes-sigs/secrets-store-csi-driver
+ presubmit  | release-secrets-store-csi-driver-e2e-gcp                            | kubernetes-sigs/secrets-store-csi-driver
+ presubmit  | pull-secrets-store-csi-driver-image-scan                            | kubernetes-sigs/secrets-store-csi-driver
+ presubmit  | pull-secrets-store-csi-driver-unit                                  | kubernetes-sigs/secrets-store-csi-driver
+ presubmit  | pull-secrets-store-csi-driver-e2e-akeyless                          | kubernetes-sigs/secrets-store-csi-driver
+ presubmit  | release-secrets-store-csi-driver-e2e-azure                          | kubernetes-sigs/secrets-store-csi-driver
+ presubmit  | pull-secrets-store-csi-driver-e2e-aws                               | kubernetes-sigs/secrets-store-csi-driver
+ presubmit  | pull-secrets-store-csi-driver-e2e-provider-k8s-1-24-7               | kubernetes-sigs/secrets-store-csi-driver
+ presubmit  | pull-secrets-store-csi-driver-e2e-windows                           | kubernetes-sigs/secrets-store-csi-driver
+ presubmit  | pull-secrets-store-csi-driver-e2e-provider-k8s-1-25-3               | kubernetes-sigs/secrets-store-csi-driver
+ presubmit  | pull-secrets-store-csi-driver-e2e-vault                             | kubernetes-sigs/secrets-store-csi-driver
+ presubmit  | pull-secrets-store-csi-driver-sanity                                | kubernetes-sigs/secrets-store-csi-driver
+ presubmit  | pull-secrets-store-csi-driver-lint                                  | kubernetes-sigs/secrets-store-csi-driver
+(27 rows)
+
+#+end_example
+
+This looks good.  I'm going to make it as a view, and then make sure I can pull the data from a type of job.
+
+#+begin_src sql-mode
 begin;
-create table prow.owners(
-  id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
-  repo text,
-  head text,
-  ref text,
-  file text,
-  data jsonb
+create view prow.job as (
+  --periodics
+  select file,
+         p->>'name' as job,
+         'periodic' as job_type,
+         null as key,
+         p as data
+    from prow.job_raw raw
+         , jsonb_array_elements(raw.data -> 'periodics') p
+           union (
+             --presubmits
+             select file,
+                    prejob->>'name' job,
+                    'presubmit' as job_type,
+                    presubmits.key as key,
+                    prejob as data
+               from prow.job_raw raw
+                    , jsonb_each(raw.data -> 'presubmits') presubmits(key, value)
+                    , jsonb_array_elements(presubmits.value) prejob)
+           union (
+             --postsubmits
+             select file,
+                    postjob->>'name' job,
+                    'postsubmit' as job_type,
+                    post.key as key,
+                    postjob as data
+               from prow.job_raw raw
+                    , jsonb_each(raw.data -> 'postsubmits') post(key, value)
+                    , jsonb_array_elements(post.value) postjob)
 );
+
+select job, data->>'cluster'
+  from prow.job
+ where job_type = 'periodic'
+   and data->>'cluster' is not null
+ limit 1;
+rollback;
+#+end_src
+
+#+RESULTS:
+: BEGIN
+: postgres=*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# CREATE VIEW
+: postgres=*# postgres=*# postgres-*# postgres-*# postgres-*# postgres-*#                      job                      |           ?column?
+: ----------------------------------------------+------------------------------
+:  cluster-api-provider-aws-push-images-nightly | k8s-infra-prow-build-trusted
+: (1 row)
+:
+: postgres=*# COMMIT
+
+Beautiful!  Let's commit that view!!
+
+
+* exploring prow.job
+#+begin_src sql-mode
+select count(*)
+  from prow.job;
+#+end_src
+
+#+RESULTS:
+:  count
+: -------
+:   2875
+: (1 row)
+:
+
+#+begin_src sql-mode
+select count(*)
+  from prow.job
+ where data->>'cluster' is not null;
+#+end_src
+
+#+RESULTS:
+:  count
+: -------
+:    686
+: (1 row)
+:
+
+#+begin_src sql-mode
+with c as(
+  select
+    data->>'cluster' as cluster,
+    count(*) as total_jobs,
+    count(*) filter(where job_type = 'periodic') as periodics,
+    count(*) filter(where job_type = 'presubmit') as presubmits,
+    count(*) filter(where job_type = 'postsubmit') as postsubmits
+    from prow.job
+   where data->>'cluster' is not null
+   group by data->>'cluster'
+)
+select case grouping(c.cluster) when 0 then c.cluster::text else 'Total' end as cluster,
+       sum(total_jobs) as total_jobs,
+       sum(periodics) as periodics,
+       sum(presubmits) as presubmits,
+       sum(postsubmits) as postsubmits
+  from c
+ group by grouping sets((c.cluster,c.total_jobs,c.periodics,c.presubmits,c.postsubmits),())
+          ;
+#+end_src
+
+
+
+#+RESULTS:
+:                cluster               | total_jobs | periodics | presubmits | postsubmits
+: -------------------------------------+------------+-----------+------------+-------------
+:  gke_rules-k8s_us-central1-f_testing |          1 |         0 |          1 |           0
+:  k8s-infra-prow-build                |        412 |       218 |        194 |           0
+:  k8s-infra-prow-build-trusted        |        243 |        60 |          0 |         183
+:  test-infra-trusted                  |         30 |        10 |          0 |          20
+:  Total                               |        686 |       288 |        195 |         203
+: (5 rows)
+:
+
+#+begin_src
+
+#+end_src
+
+** TODO [2/3] OWNERS
+*** DONE Get the data as a json in the data folder
+Same as prow.job, using prowfetch.clj
+*** DONE make a prow.owners table and load it with data
+after updating the dockerfile and the first initscript to use this prowfetch
+script, i should be able to interact with the db and load up the files in /data.
+
+#+begin_src sql-mode
+begin;
+-- create table prow.owners(
+--   id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+--   repo text,
+--   head text,
+--   ref text,
+--   file text,
+--   data jsonb
+-- );
 
 create temp table prow_owners_raw(data jsonb);
 \copy prow_owners_raw from '../data/owners.json' csv quote e'\x01' delimiter e'\x02';
+
+select count(*) from prow_owners_raw;
 
 insert into prow.owners(repo,head,ref,file,data)
             (select p->>'repo',
@@ -164,56 +720,107 @@ insert into prow.owners(repo,head,ref,file,data)
                from prow_owners_raw raw,
                     jsonb_array_elements(raw.data) p);
 drop table prow_owners_raw;
-select count(*) from prow.owners;
 rollback;
 #+end_src
 
 #+RESULTS:
 #+begin_example
 BEGIN
-postgres=*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# CREATE TABLE
-postgres=*# postgres=*# CREATE TABLE
+postgres=*# postgres=*# postgres=*# postgres=*# postgres=*# postgres=*# postgres=*# postgres=*# postgres=*# postgres=*# CREATE TABLE
 postgres=*# COPY 1
-postgres=*# postgres=*# postgres-*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# INSERT 0 267
-postgres=*# DROP TABLE
-postgres=*#  count
+postgres=*# postgres=*#  count
 -------
-   267
+     1
 (1 row)
 
-postgres=*# ROLLBACK
+postgres=*# postgres=*# postgres-*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# INSERT 0 267
+postgres=*# DROP TABLE
+postgres=*# COMMIT
 #+end_example
 
 Now, convert this to init scripts
-*** TODO Add work to initdb and test it workd
+*** WAIT Add work to initdb and test it workd
 I created two files ~106_prow_owners_table.sql~ and ~505_load_prow_owners.sql~ in our initdb from the above work.
 
 I then restarted the container.  If it works, I should be able to get some already present info from an already made table
 
 #+begin_src sql-mode :results output
 select ref, file, jsonb_object_keys(data)
-  from prow.job limit 5;
+  from prow.owners limit 5;
 #+end_src
 
 #+RESULTS:
-:                    ref                    |                                         file                                          | jsonb_object_keys
-: ------------------------------------------+---------------------------------------------------------------------------------------+-------------------
-:  2da1f1fbc7447b1bf1faf4eea5ce55d5dca11a28 | test-infra/config/jobs/GoogleCloudPlatform/k8s-cluster-bundle/k8s-cluster-bundle.yaml | presubmits
-:  2da1f1fbc7447b1bf1faf4eea5ce55d5dca11a28 | test-infra/config/jobs/GoogleCloudPlatform/k8s-cluster-bundle/k8s-cluster-bundle.yaml | postsubmits
-:  2da1f1fbc7447b1bf1faf4eea5ce55d5dca11a28 | test-infra/config/jobs/bazelbuild/rules_k8s/rules_k8s_config.yaml                     | presubmits
-:  2da1f1fbc7447b1bf1faf4eea5ce55d5dca11a28 | test-infra/config/jobs/cadvisor/cadvisor.yaml                                         | presets
-:  2da1f1fbc7447b1bf1faf4eea5ce55d5dca11a28 | test-infra/config/jobs/cadvisor/cadvisor.yaml                                         | periodics
+:                    ref                    |           file           | jsonb_object_keys
+: ------------------------------------------+--------------------------+--------------------
+:  2da1f1fbc7447b1bf1faf4eea5ce55d5dca11a28 | test-infra/OWNERS        | labels
+:  2da1f1fbc7447b1bf1faf4eea5ce55d5dca11a28 | test-infra/OWNERS        | approvers
+:  2da1f1fbc7447b1bf1faf4eea5ce55d5dca11a28 | test-infra/OWNERS        | reviewers
+:  2da1f1fbc7447b1bf1faf4eea5ce55d5dca11a28 | test-infra/OWNERS        | emeritus_approvers
+:  2da1f1fbc7447b1bf1faf4eea5ce55d5dca11a28 | test-infra/boskos/OWNERS | labels
 : (5 rows)
 :
 
-sweet!
+ah..this does not look right! will need to look in more on why each yaml head got added as its own file
 
-
-- [ ] Get the data as a json in the data folder
-  I did this using the prowfetch.clj file
-- [X] for above repo
-- [ ] find config/jobs \OWNERS\* | > json
-- [ ] Load json into owners table, keeping track of the src code folder the yaml from
-- [ ] find way to connect job to owners
 ** TODO [0/1] DECK
-- [ ] load deck json (20k)
+* scratch
+#+begin_src sql-mode
+select jsonb_object_keys(data) as keylist
+  from prow.job
+ where data::text <> 'null'
+ group by keylist;
+#+end_src
+
+#+RESULTS:
+#+begin_example
+         keylist
+--------------------------
+ gcRegistry
+ presets
+ promoterE2eRegistry
+ cloudProviderGcpRegistry
+ microsoftRegistry
+ invalidRegistry
+ gcEtcdRegistry
+ privateRegistry
+ periodics
+ presubmits
+ buildImageRegistry
+ gcAuthenticatedRegistry
+ sigStorageRegistry
+ postsubmits
+ dockerLibraryRegistry
+(15 rows)
+
+#+end_example
+
+#+begin_src sql-mode
+select file,data->'periodics'
+  from prow.job
+         where data->'periodics' is not null
+ limit 1;
+#+end_src
+
+#+RESULTS:
+:                      file                      |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 ?column?
+: -----------------------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+:  test-infra/config/jobs/cadvisor/cadvisor.yaml | [{"name": "ci-cadvisor-e2e", "spec": {"containers": [{"env": [{"name": "GOPATH", "value": "/go"}], "args": ["--job=$(JOB_NAME)", "--root=/go/src", "--repo=k8s.io/kubernetes", "--repo=github.com/google/cadvisor=master", "--service-account=/etc/service-account/service-account.json", "--timeout=90", "--upload=gs://kubernetes-jenkins/logs", "--scenario=kubernetes_e2e", "--", "--deployment=node", "--gcp-project=ci-cadvisor-e2e", "--gcp-zone=us-central1-f", "--node-args=--image-config-file=/workspace/test-infra/jobs/e2e_node/containerd/image-cadvisor.yaml --test-suite=cadvisor", "--node-tests=true", "--provider=gce", "--test_args=--nodes=1", "--timeout=10m"], "image": "gcr.io/k8s-staging-test-infra/kubekins-e2e:v20230207-192d5afee3-master"}]}, "labels": {"preset-k8s-ssh": "true", "preset-service-account": "true"}, "interval": "8h", "annotations": {"testgrid-tab-name": "cadvisor-e2e", "testgrid-dashboards": "sig-node-cadvisor"}}]
+: (1 row)
+:
+
+
+#+begin_src sql-mode
+select jsonb_object_keys(data)
+  from prow.owners
+ where file = 'test-infra/OWNERS';
+#+end_src
+
+#+RESULTS:
+:  jsonb_object_keys  
+: --------------------
+:  labels
+:  approvers
+:  reviewers
+:  emeritus_approvers
+: (4 rows)
+:
