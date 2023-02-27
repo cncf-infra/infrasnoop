@@ -26,10 +26,8 @@ SRC Yaml files here:
 - https://github.com/kubernetes/test-infra/tree/master/config/jobs
 Living Results of jobs here:
 - https://prow.k8s.io
-* Strategy
-These should all be codified into steps in the initdb for infrasnoop
-** DONE [3/3] JOBS
-*** DONE Get the data as a json in the data folder
+* DONE [3/3] JOBS
+** DONE Get the data as a json in the data folder
 I did this using prowfetch.clj, a small babashka script. This lets me re-use functionality, and quickly add in the metadata
 we needed like the filename, the ref, and the branch.
 the relevant code is
@@ -61,7 +59,7 @@ the relevant code is
 (files->json "./test-infra/config/jobs/" "**.yaml" "prow-jobs.json")
 (files->json "./test-infra/" "**OWNERS" "owners.json")
 #+end_src
-*** DONE make a prow.jobs table and load it with data
+** DONE make a prow.jobs table and load it with data
 after updating the dockerfile and the first initscript to use this prowfetch
 script, i should be able to interact with the db and load up the files in /data.
 
@@ -110,7 +108,7 @@ postgres=*# COMMIT
 #+end_example
 
 looking good. I'll break this into two files loaded into the initdb.
-*** DONE Add work to initdb and test it workd
+** DONE Add work to initdb and test it workd
 I created two files ~105_prow_job_table.sql~ and ~504_load_prow_jobs.sql~ in our initdb from the above work.
 
 I then restarted the container.  If it works, I should be able to get some already present info from an already made table
@@ -392,7 +390,7 @@ select job_type,job,key from all_jobs
 #+end_example
 
 Looking good!
-* Postsubmits
+** Postsubmits
 
 #+begin_src sh
 cat '../data/test-infra/config/jobs/kubernetes/sig-release/release-branch-jobs/1.26.yaml' \
@@ -444,8 +442,7 @@ select count(*)
 : (1 row)
 :
 
-
-* double check work
+** double check work
 I want to investigate another file that has all three job types:
 : test-infra/config/jobs/kubernetes-sigs/secrets-store-csi-driver/secrets-store-csi-driver-config.yaml
 
@@ -526,7 +523,7 @@ with all_jobs as (
                     , jsonb_array_elements(post.value) postjob)
 )
 select job_type,job,key
-  from all_jobs
+  from prow.job
  where file = 'test-infra/config/jobs/kubernetes-sigs/secrets-store-csi-driver/secrets-store-csi-driver-config.yaml'
  order by job_type;
 
@@ -622,8 +619,7 @@ rollback;
 
 Beautiful!  Let's commit that view!!
 
-
-* exploring prow.job
+** exploring prow.job
 #+begin_src sql-mode
 select count(*)
   from prow.job;
@@ -688,10 +684,10 @@ select case grouping(c.cluster) when 0 then c.cluster::text else 'Total' end as 
 
 #+end_src
 
-** TODO [2/3] OWNERS
-*** DONE Get the data as a json in the data folder
+* TODO [2/3] OWNERS
+** DONE Get the data as a json in the data folder
 Same as prow.job, using prowfetch.clj
-*** DONE make a prow.owners table and load it with data
+** DONE make a prow.owners table and load it with data
 after updating the dockerfile and the first initscript to use this prowfetch
 script, i should be able to interact with the db and load up the files in /data.
 
@@ -739,88 +735,104 @@ postgres=*# COMMIT
 #+end_example
 
 Now, convert this to init scripts
-*** WAIT Add work to initdb and test it workd
+** WAIT Add work to initdb and test it workd
 I created two files ~106_prow_owners_table.sql~ and ~505_load_prow_owners.sql~ in our initdb from the above work.
 
 I then restarted the container.  If it works, I should be able to get some already present info from an already made table
 
 #+begin_src sql-mode :results output
-select ref, file, jsonb_object_keys(data)
-  from prow.owners limit 5;
-#+end_src
-
-#+RESULTS:
-:                    ref                    |           file           | jsonb_object_keys
-: ------------------------------------------+--------------------------+--------------------
-:  2da1f1fbc7447b1bf1faf4eea5ce55d5dca11a28 | test-infra/OWNERS        | labels
-:  2da1f1fbc7447b1bf1faf4eea5ce55d5dca11a28 | test-infra/OWNERS        | approvers
-:  2da1f1fbc7447b1bf1faf4eea5ce55d5dca11a28 | test-infra/OWNERS        | reviewers
-:  2da1f1fbc7447b1bf1faf4eea5ce55d5dca11a28 | test-infra/OWNERS        | emeritus_approvers
-:  2da1f1fbc7447b1bf1faf4eea5ce55d5dca11a28 | test-infra/boskos/OWNERS | labels
-: (5 rows)
-:
-
-ah..this does not look right! will need to look in more on why each yaml head got added as its own file
-
-** TODO [0/1] DECK
-* scratch
-#+begin_src sql-mode
-select jsonb_object_keys(data) as keylist
-  from prow.job
- where data::text <> 'null'
- group by keylist;
-#+end_src
-
-#+RESULTS:
-#+begin_example
-         keylist
---------------------------
- gcRegistry
- presets
- promoterE2eRegistry
- cloudProviderGcpRegistry
- microsoftRegistry
- invalidRegistry
- gcEtcdRegistry
- privateRegistry
- periodics
- presubmits
- buildImageRegistry
- gcAuthenticatedRegistry
- sigStorageRegistry
- postsubmits
- dockerLibraryRegistry
-(15 rows)
-
-#+end_example
-
-#+begin_src sql-mode
-select file,data->'periodics'
-  from prow.job
-         where data->'periodics' is not null
- limit 1;
-#+end_src
-
-#+RESULTS:
-:                      file                      |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 ?column?
-: -----------------------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-:  test-infra/config/jobs/cadvisor/cadvisor.yaml | [{"name": "ci-cadvisor-e2e", "spec": {"containers": [{"env": [{"name": "GOPATH", "value": "/go"}], "args": ["--job=$(JOB_NAME)", "--root=/go/src", "--repo=k8s.io/kubernetes", "--repo=github.com/google/cadvisor=master", "--service-account=/etc/service-account/service-account.json", "--timeout=90", "--upload=gs://kubernetes-jenkins/logs", "--scenario=kubernetes_e2e", "--", "--deployment=node", "--gcp-project=ci-cadvisor-e2e", "--gcp-zone=us-central1-f", "--node-args=--image-config-file=/workspace/test-infra/jobs/e2e_node/containerd/image-cadvisor.yaml --test-suite=cadvisor", "--node-tests=true", "--provider=gce", "--test_args=--nodes=1", "--timeout=10m"], "image": "gcr.io/k8s-staging-test-infra/kubekins-e2e:v20230207-192d5afee3-master"}]}, "labels": {"preset-k8s-ssh": "true", "preset-service-account": "true"}, "interval": "8h", "annotations": {"testgrid-tab-name": "cadvisor-e2e", "testgrid-dashboards": "sig-node-cadvisor"}}]
-: (1 row)
-:
-
-
-#+begin_src sql-mode
-select jsonb_object_keys(data)
+select ref, file,
+       jsonb_object_keys(data) as top_level_keys
   from prow.owners
  where file = 'test-infra/OWNERS';
 #+end_src
 
 #+RESULTS:
-:  jsonb_object_keys  
-: --------------------
-:  labels
-:  approvers
-:  reviewers
-:  emeritus_approvers
+:                    ref                    |       file        |   top_level_keys
+: ------------------------------------------+-------------------+--------------------
+:  2da1f1fbc7447b1bf1faf4eea5ce55d5dca11a28 | test-infra/OWNERS | labels
+:  2da1f1fbc7447b1bf1faf4eea5ce55d5dca11a28 | test-infra/OWNERS | approvers
+:  2da1f1fbc7447b1bf1faf4eea5ce55d5dca11a28 | test-infra/OWNERS | reviewers
+:  2da1f1fbc7447b1bf1faf4eea5ce55d5dca11a28 | test-infra/OWNERS | emeritus_approvers
 : (4 rows)
 :
+
+* TODO [0/1] DECK
+This pulls from our prow-deck.js, and the data shoudld be relatively simpler than the first two
+#+begin_src bash :results output
+cat ../data/prow-deck.json | jq ".[0]"
+#+end_src
+
+#+RESULTS:
+#+begin_example
+{
+  "type": "periodic",
+  "refs": {
+    "org": "",
+    "repo": ""
+  },
+  "refs_key": "",
+  "job": "ci-k8s-infra-build-cluster-prow-build",
+  "build_id": "1628863647398760448",
+  "context": "",
+  "started": "1677186331",
+  "finished": "",
+  "duration": "",
+  "state": "pending",
+  "description": "Job triggered.",
+  "url": "https://prow.k8s.io/view/gs/kubernetes-jenkins/logs/ci-k8s-infra-build-cluster-prow-build/1628863647398760448",
+  "pod_name": "ce5314c2-b3bd-11ed-8bad-566420431476",
+  "agent": "kubernetes",
+  "prow_job": "ce5314c2-b3bd-11ed-8bad-566420431476"
+}
+#+end_example
+
+#+begin_src sql-mode
+begin;
+create table prow.deck(
+  id uuid not null default gen_random_uuid() primary key,
+  refs_key text,
+  job text,
+  build_id text,
+  context text,
+  started timestamp,
+  finished timestamp,
+  duration text,
+  state text,
+  description text,
+  url text,
+  pod_name text,
+  agent text,
+  prow_job text
+);
+
+create temporary table prow_deck_import(data jsonb);
+\copy prow_deck_import from '../data/prow-deck.json' csv quote e'\x01' delimiter e'\x02';
+select count(*) from prow_deck_import;
+insert into prow.deck(refs_key, job,build_id,context,started,finished,duration,state,description,url,pod_name,agent,prow_job)
+select
+  d->>'refs_key',
+  d->>'job',
+  d->>'build_id',
+  d->>'context',
+  to_timestamp((d->>'started')::bigint),
+  case when (d->>'finished') != ''
+    then (d->>'finished')::timestamp
+  else null
+  end as finished,
+  d->>'duration',
+  d->>'state',
+  d->>'description',
+  d->>'url',
+  d->>'pod_name',
+  d->>'agent',
+  d->>'prow_job'
+  from prow_deck_import deck,
+       jsonb_array_elements(deck.data) d;
+
+commit;
+#+end_src
+
+
+* Prow Job Logs
+for the successful jobs, let's load in their logs so we can explore further.
