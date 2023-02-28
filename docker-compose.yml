@@ -1,6 +1,7 @@
 version: '3'
 services:
   postgress-postgresql:
+    platform: linux/amd64
     image: infrasnoop:latest
     volumes:
       - ./initdb:/docker-entrypoint-initdb.d/
