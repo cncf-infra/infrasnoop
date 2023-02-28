@@ -604,7 +604,7 @@ select job, data->>'cluster'
  where job_type = 'periodic'
    and data->>'cluster' is not null
  limit 1;
-rollback;
+commit;
 #+end_src
 
 #+RESULTS:
@@ -684,10 +684,10 @@ select case grouping(c.cluster) when 0 then c.cluster::text else 'Total' end as 
 
 #+end_src
 
-* TODO [2/3] OWNERS
-** DONE Get the data as a json in the data folder
+** DONE [3/3] OWNERS
+*** DONE Get the data as a json in the data folder
 Same as prow.job, using prowfetch.clj
-** DONE make a prow.owners table and load it with data
+*** DONE make a prow.owners table and load it with data
 after updating the dockerfile and the first initscript to use this prowfetch
 script, i should be able to interact with the db and load up the files in /data.
 
@@ -735,7 +735,7 @@ postgres=*# COMMIT
 #+end_example
 
 Now, convert this to init scripts
-** WAIT Add work to initdb and test it workd
+*** DONE Add work to initdb and test it workd
 I created two files ~106_prow_owners_table.sql~ and ~505_load_prow_owners.sql~ in our initdb from the above work.
 
 I then restarted the container.  If it works, I should be able to get some already present info from an already made table
@@ -757,7 +757,7 @@ select ref, file,
 : (4 rows)
 :
 
-* TODO [0/1] DECK
+* DONE DECK
 This pulls from our prow-deck.js, and the data shoudld be relatively simpler than the first two
 #+begin_src bash :results output
 cat ../data/prow-deck.json | jq ".[0]"
@@ -833,6 +833,121 @@ select
 commit;
 #+end_src
 
-
-* Prow Job Logs
+* TODO Prow Job Logs
 for the successful jobs, let's load in their logs so we can explore further.
+
+#+begin_src sql-mode
+select job from prow.job limit 5;
+#+end_src
+
+#+RESULTS:
+:            job
+: --------------------------
+:  pull-rules-k8s-e2e
+:  ci-cadvisor-e2e
+:  pull-cadvisor-e2e
+:  pull-containerd-build
+:  pull-containerd-node-e2e
+: (5 rows)
+:
+
+#+begin_src sql-mode
+\d+ prow.deck
+#+end_src
+
+#+RESULTS:
+#+begin_example
+                                                                  Table "prow.deck"
+   Column    |            Type             | Collation | Nullable |      Default      | Storage  | Compression | Stats target |      Description
+-------------+-----------------------------+-----------+----------+-------------------+----------+-------------+--------------+-----------------------
+ id          | uuid                        |           | not null | gen_random_uuid() | plain    |             |              | Auto generated row id
+ refs_key    | text                        |           |          |                   | extended |             |              |
+ job         | text                        |           |          |                   | extended |             |              |
+ build_id    | text                        |           |          |                   | extended |             |              |
+ context     | text                        |           |          |                   | extended |             |              |
+ started     | timestamp without time zone |           |          |                   | plain    |             |              |
+ finished    | timestamp without time zone |           |          |                   | plain    |             |              |
+ duration    | text                        |           |          |                   | extended |             |              |
+ state       | text                        |           |          |                   | extended |             |              |
+ description | text                        |           |          |                   | extended |             |              |
+ url         | text                        |           |          |                   | extended |             |              |
+ pod_name    | text                        |           |          |                   | extended |             |              |
+ agent       | text                        |           |          |                   | extended |             |              |
+ prow_job    | text                        |           |          |                   | extended |             |              |
+Indexes:
+    "deck_pkey" PRIMARY KEY, btree (id)
+Access method: heap
+
+#+end_example
+
+#+begin_src sql-mode :results output
+select url
+  from prow.deck
+ where state = 'success'
+ group by job, build_id,started,url
+ order by started
+ limit 3;
+#+end_src
+
+#+RESULTS:
+:                                                         url
+: --------------------------------------------------------------------------------------------------------------------
+:  https://prow.k8s.io/view/gs/kubernetes-jenkins/logs/e2e-kops-grid-calico-rhel8-k24-ko25/1627781808819015680
+:  https://prow.k8s.io/view/gs/kubernetes-jenkins/logs/e2e-kops-grid-kubenet-amzn2-k24-ko26/1627783822240124928
+:  https://prow.k8s.io/view/gs/kubernetes-jenkins/logs/e2e-kops-grid-cilium-etcd-rhel8-k23-docker/1627794644144230400
+: (3 rows)
+:
+* Prow artifacts
+
+Once i have the prow artifacts json loaded, via prowfetch, it's relatively straightforward loading them in.
+
+#+begin_src sql-mode
+begin;
+create table prow.artifact(
+  id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  job text,
+  build_id text,
+  artifact_url text,
+  size text,
+  modified text
+);
+
+create temporary table prow_artifact_import(data jsonb);
+
+\copy prow_artifact_import from '../data/job-logs.json' csv quote e'\x01' delimiter e'\x02';
+
+select count(*) from prow_artifact_import;
+
+insert into prow.artifact(job,build_id,artifact_url,size,modified)
+select job->>'job',
+       job->>'build_id',
+       artifact->>'href',
+       artifact->>'size',
+       artifact->>'modified'
+  from prow_artifact_import import,
+       jsonb_array_elements(import.data) job,
+       jsonb_array_elements(job->'artifacts') artifact;
+
+select job,build_id, artifact_url,size from prow.artifact group by job,build_id,artifact_url,size order by job limit 10;
+rollback;
+#+end_src
+
+
+I mae up files for all this, so we can now do stuff like
+
+#+begin_src sql-mode
+select artifact_url from prow.artifact limit 5;
+#+end_src
+
+#+RESULTS:
+:                                                                          artifact_url
+: --------------------------------------------------------------------------------------------------------------------------------------------------------------
+:  https://storage.googleapis.com/kubernetes-jenkins/pr-logs/pull/kubernetes-sigs_kubespray/9838/pull-kubespray-yamllint/1630712767818240000/build-log.txt
+:  https://storage.googleapis.com/kubernetes-jenkins/pr-logs/pull/kubernetes-sigs_kubespray/9838/pull-kubespray-yamllint/1630712767818240000/clone-log.txt
+:  https://storage.googleapis.com/kubernetes-jenkins/pr-logs/pull/kubernetes-sigs_kubespray/9838/pull-kubespray-yamllint/1630712767818240000/clone-records.json
+:  https://storage.googleapis.com/kubernetes-jenkins/pr-logs/pull/kubernetes-sigs_kubespray/9838/pull-kubespray-yamllint/1630712767818240000/finished.json
+:  https://storage.googleapis.com/kubernetes-jenkins/pr-logs/pull/kubernetes-sigs_kubespray/9838/pull-kubespray-yamllint/1630712767818240000/podinfo.json
+: (5 rows)
+:
+* Next
+- clean up the tables to make sure the foreign keys are linkedf
