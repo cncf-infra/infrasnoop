@@ -142,6 +142,6 @@
 ;;        (flatten
 ;;         (get-all-artifacts "https://gcsweb.k8s.io/gcs/kubernetes-jenkins/logs/test-infra-cfl-coverage-report/1630446352808808448/"))))
 
-(spit "job-artifacts-test.json"
-      (json/generate-string
-       (successful-jobs "prow-deck.json")))
+;; (spit "job-artifacts-test.json"
+;;       (json/generate-string
+;;        (successful-jobs "prow-deck.json")))
