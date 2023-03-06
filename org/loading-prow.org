@@ -949,5 +949,107 @@ select artifact_url from prow.artifact limit 5;
 :  https://storage.googleapis.com/kubernetes-jenkins/pr-logs/pull/kubernetes-sigs_kubespray/9838/pull-kubespray-yamllint/1630712767818240000/podinfo.json
 : (5 rows)
 :
-* Next
-- clean up the tables to make sure the foreign keys are linkedf
+* Job urls
+we have a list of all the urls in all the index pages of our job artifacts. let's load it into a table!
+
+#+begin_src sql-mode
+\dt
+#+end_src
+
+#+RESULTS:
+:              List of relations
+:  Schema |     Name      | Type  |  Owner
+: --------+---------------+-------+----------
+:  public | committee     | table | postgres
+:  public | sig           | table | postgres
+:  public | user_group    | table | postgres
+:  public | working_group | table | postgres
+: (4 rows)
+:
+
+#+begin_src sql-mode
+\dt prow.*
+#+end_src
+
+#+RESULTS:
+:           List of relations
+:  Schema |   Name   | Type  |  Owner
+: --------+----------+-------+----------
+:  prow   | artifact | table | postgres
+:  prow   | deck     | table | postgres
+:  prow   | job_raw  | table | postgres
+:  prow   | owners   | table | postgres
+: (4 rows)
+:
+
+#+begin_src sql-mode
+begin;
+create temporary table job_artifact_import(url text);
+
+\copy job_artifact_import from '../data/storage_urls.txt';
+
+commit;
+#+end_src
+
+#+RESULTS:
+: BEGIN
+: postgres=*# CREATE TABLE
+: postgres=*# postgres=*# COPY 145646
+: postgres=*# postgres=*# COMMIT
+
+#+begin_src sql-mode
+ALTER TABLE prow.artifact
+RENAME COLUMN artifact_url TO url;
+#+end_src
+
+#+RESULTS:
+: ALTER TABLE
+
+#+begin_src sql-mode :results output
+begin;
+create temporary table job_artifact_import(url text);
+
+\copy job_artifact_import from '../data/storage_urls.txt';
+
+insert into prow.artifact(job,build_id,url)
+select
+  regexp_substr(url,'(?<=https://storage.googleapis.com/kubernetes-jenkins/logs/)[a-zA-Z0-9-]*(?=/)') as job,
+  regexp_substr(url,'(?<=https://storage.googleapis.com/kubernetes-jenkins/logs/.*/)[0-9]*(?=/)') as build_id,
+  url as url
+  from job_artifact_import;
+drop temporary table job_artifact_import;
+commit;
+#+end_src
+
+#+RESULTS:
+: BEGIN
+: postgres=*# postgres-*# postgres-*# postgres-*# postgres-*# postgres-*# INSERT 0 145646
+: postgres=*# COMMIT
+
+#+begin_src sql-mode
+select distinct length(build_id) from prow.artifact;
+#+end_src
+
+#+RESULTS:
+:  length
+: --------
+:      19
+: (1 row)
+:
+
+
+#+begin_src sql-mode
+select count(*)
+  from prow.artifact
+ where url like '%.json'
+    or url like '%.yaml'
+    or url like '%.yml'
+    or url like '%.txt';
+#+end_src
+
+#+RESULTS:
+:  count
+: -------
+:  56317
+: (1 row)
+:
