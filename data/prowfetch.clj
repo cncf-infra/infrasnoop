@@ -33,11 +33,6 @@
    (sequence (distinct-by f) xs)))
 
 
-(def ztest [{:name "z" :time 3} {:name "z" :time 1} {:name "h" :time 1} {:name "z" :time 2} {:name "h" :time 0}])
-
-(distinct-by :name ztest)
-
-
 (def ref-branch
   (-> "./test-infra/.git/packed-refs"
       slurp
@@ -111,10 +106,13 @@
   (let [artifact-url (url->artifact-url url)
         text (get-artifact-text! artifact-url)
         rows (artifact-text->rows text)
-        artifacts-at-level (map row->artifact rows)]
+        artifacts-at-level (map row->artifact rows)
+        artifacts-sans-pkgs (filter #(or (not (str/ends-with? (:url %) "bin/"))
+                                         (not (str/ends-with? (:url %) "pkg/"))
+                                      ) artifacts-at-level)]
     (pmap #(if (str/ends-with? (:url %) "/")
             (get-all-artifacts (:url %))
-            %) artifacts-at-level)))
+            %) artifacts-sans-pkgs)))
 
 (defn add-artifacts
   "given a job map, add an artifact key with all artifact urls in that job's gcs bucket"
@@ -144,31 +142,6 @@
          :user "postgres"
          :password "infra"
          :port 5432})
-
-(pg/execute! db ["insert into "])
-
-(sql/insert-multi! db :prow.artifact
-                  [:job :build_id]
-                  [["zach is cool" "good"]])
-
-
-(def jobs (successful-jobs))
-
-
-
-                 (json/parse-string (:body (curl/get (:url (nth (:artifacts (first jobs)) 4)))))
-
-(pg/execute! db ["insert into prow.artifact(job,build_id,data,filetype)
-values('testing','1234',?,'json');"
-                 (pg/write-jsonb (json/parse-string (:body (curl/get (:url (nth (:artifacts (first jobs)) 4))))))])
-
-
-(sql/insert-multi! db :prow.artifact
-                   [:job :build_id :data :filetype]
-                   [["testing"
-                     "123"
-                     (json/parse-string (:body (curl/get (:url (nth (:artifacts (first jobs)) 3)))))
-                     "json"]])
 
 (defn parse-filetype
   [url]
@@ -214,5 +187,5 @@ values('testing','1234',?,'json');"
   [{:keys [job build_id] :as dajob} ]
   (pmap #(insert-artifact! job build_id %) (:artifacts dajob)))
 
-(println "Starting to insert artifacts")
-(pmap insert-artifacts! (successful-jobs))
+;; (println "Starting to insert artifacts")
+;; (pmap insert-artifacts! (successful-jobs))
