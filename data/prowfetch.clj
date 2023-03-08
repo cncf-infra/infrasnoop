@@ -10,6 +10,9 @@
 (pods/load-pod "bootleg")
 (require '[pod.retrogradeorbit.bootleg.utils :refer [convert-to]]
          '[pod.retrogradeorbit.hickory.select :as s])
+(pods/load-pod 'org.babashka/postgresql "0.1.0")
+(require '[pod.babashka.postgresql :as pg])
+(require '[pod.babashka.postgresql.sql :as sql])
 
 (defn distinct-by
   "Returns a stateful transducer that removes elements by calling f on each step as a uniqueness key.
@@ -121,8 +124,8 @@
 
 (defn successful-jobs
   "takes a prow-deck json and gets all successful jobs, returning just the job, build, and relevant urls"
-  [deck]
-  (let [deck-json (json/parse-string (slurp deck) true)]
+  []
+  (let [deck-json (json/parse-string (:body (curl/get "prow.k8s.io/data.js")) true)]
     (->> deck-json
          (filter #(= "success" (:state %)))
          (sort-by :started)
@@ -133,15 +136,82 @@
 
 (files->json "./test-infra/config/jobs/" "**.yaml" "prow-jobs.json")
 (files->json "./test-infra/" "**OWNERS" "owners.json")
-(spit "prow-deck.json" (:body (curl/get "https://prow.k8s.io/data.js")))
-;; (spit "job-artifacts.json" (json/generate-string (successful-jobs "prow-deck.json")))
 
 
-;; (spit "job-artifacts-test.json"
-;;       (json/generate-string
-;;        (flatten
-;;         (get-all-artifacts "https://gcsweb.k8s.io/gcs/kubernetes-jenkins/logs/test-infra-cfl-coverage-report/1630446352808808448/"))))
+(def db {:dbtype "postgresql"
+         :host "localhost"
+         :dbname "postgres"
+         :user "postgres"
+         :password "infra"
+         :port 5432})
 
-;; (spit "job-artifacts-test.json"
-;;       (json/generate-string
-;;        (successful-jobs "prow-deck.json")))
+(pg/execute! db ["insert into "])
+
+(sql/insert-multi! db :prow.artifact
+                  [:job :build_id]
+                  [["zach is cool" "good"]])
+
+
+(def jobs (successful-jobs))
+
+
+
+                 (json/parse-string (:body (curl/get (:url (nth (:artifacts (first jobs)) 4)))))
+
+(pg/execute! db ["insert into prow.artifact(job,build_id,data,filetype)
+values('testing','1234',?,'json');"
+                 (pg/write-jsonb (json/parse-string (:body (curl/get (:url (nth (:artifacts (first jobs)) 4))))))])
+
+
+(sql/insert-multi! db :prow.artifact
+                   [:job :build_id :data :filetype]
+                   [["testing"
+                     "123"
+                     (json/parse-string (:body (curl/get (:url (nth (:artifacts (first jobs)) 3)))))
+                     "json"]])
+
+(defn parse-filetype
+  [url]
+  (let [ext? (fn [ext] (str/ends-with? (str/lower-case url) ext))]
+    (cond
+      (ext? "json") "json"
+      (or (ext? "yaml") (ext? "yml")) "yaml"
+      (ext? "log") "log"
+      :else "text")))
+
+(defn parse-content
+  [ext content]
+  (if (:prowfetch_error content)
+    content
+    (cond
+      (= ext "json") (json/parse-string content)
+      (= ext "yaml") (yaml/parse-string content)
+      :else (assoc {} :content content))))
+
+(defn get-content!
+  [url]
+  (try
+    (:body (curl/get url))
+    (catch Exception e
+      (println e)
+      {:prowfetch_error e})))
+
+
+(defn insert-artifact!
+  [job build_id {:keys [url size modified]}]
+  (let [filetype (parse-filetype url)
+        raw-content (get-content! url)
+        data (pg/write-jsonb (parse-content filetype raw-content))]
+    (try
+      (pg/execute! db
+                   ["insert into prow.artifact(job,build_id,url,size,modified,data,filetype) values(?,?,?,?,?,?,?);"
+                    job build_id url size modified data filetype])
+      (println "ARTIFACT ADDED for " job " "build_id " "url)
+      (catch Exception e
+        (println e)))))
+
+(defn insert-artifacts!
+  [{:keys [job build_id] :as dajob} ]
+  (pmap #(insert-artifact! job build_id %) (:artifacts dajob)))
+
+(pmap insert-artifacts! (successful-jobs))
