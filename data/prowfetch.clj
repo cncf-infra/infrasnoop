@@ -206,7 +206,7 @@ values('testing','1234',?,'json');"
       (pg/execute! db
                    ["insert into prow.artifact(job,build_id,url,size,modified,data,filetype) values(?,?,?,?,?,?,?);"
                     job build_id url size modified data filetype])
-      (println "ARTIFACT ADDED for " job " "build_id " "url)
+      (println "ARTIFACT ADDED for "url)
       (catch Exception e
         (println e)))))
 
@@ -214,4 +214,5 @@ values('testing','1234',?,'json');"
   [{:keys [job build_id] :as dajob} ]
   (pmap #(insert-artifact! job build_id %) (:artifacts dajob)))
 
+(println "Starting to insert artifacts")
 (pmap insert-artifacts! (successful-jobs))
