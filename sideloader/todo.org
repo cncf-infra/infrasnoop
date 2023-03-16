@@ -1,0 +1,41 @@
+#+title: Todo
+
+These functions should all be run by the sideloader.
+The sideloader should ensure all tasks are done before quitting.
+
+* TODO load prow deck results
+This is the simplest one to do, so choosing it to get the async channels working right.
+** Setup db
+** Add prow.deck table
+** Add hugsql dependency for clojure
+** Write deckjob upsert function
+This should fetch from data.js and then do an upsert to our table.
+
+The table is basically prow deck, keeping the job, build, results, etc.
+the primary keys are going to be the job+build_id.
+If the row we are adding matches the primary  keys, update.
+Otherwise, insert.
+
+We may not even need to upsert. The jobs won't change.  They're artifacts.
+So, it could be ignore, otherwise insert.
+
+Alternately, we could filter the jobs to only new ones, based on the most recent job already in the table.
+Then, we just run an upsert on these new ones.
+
+When the jobs are done, we should return a success message, or some other indicator to close the channel.
+
+Our clojure function then will call the function and then wait for the success, sending it back up the channel when done.
+* delete old prow job results
+This may be part of our loading function, with the idea that we update the data once a day when running sideloader on a schedule.
+This job then will delete from the prow job db any job older than 7 days.
+* load prow job artifacts
+* load sigs.yaml
+This should be able to be done repeatedly, updating the appropriate tables with the newest data.
+If this is a way to help assign tasks based on the prow jobs, then we dont' need historic info about the sigs at some commit.
+Instead, we want the most recent info always.
+So this should be a fetch that keeps in mind the commit of the file.
+It shoudl then select the commit hash from our db.
+If the two differ, than do an upsert, updating data if it's different
+Then it does an upsert to our table.
+The upsert says "if "
+* load owners file
