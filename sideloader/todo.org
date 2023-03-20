@@ -1,34 +1,341 @@
 #+title: Todo
+#+PROPERTY: header-args:sql-mode+ :product postgres
 
 These functions should all be run by the sideloader.
 The sideloader should ensure all tasks are done before quitting.
 
 * TODO load prow deck results
 This is the simplest one to do, so choosing it to get the async channels working right.
-** Setup db
-** Add prow.deck table
-** Add hugsql dependency for clojure
-** Write deckjob upsert function
+** DONE Setup db
+Set it up with just the prow schema, having dropped the prow table.
+** DONE Add prow.deck table
+We don't need the id anymore, job and build id are our primary keys.
+
+#+begin_src sql-mode
+begin;
+create table prow.deck(
+  refs_key text,
+  job text,
+  build_id text unique,
+  context text,
+  started timestamp,
+  finished timestamp,
+  duration text,
+  state text,
+  description text,
+  url text,
+  pod_name text,
+  agent text,
+  prow_job text,
+  primary key(job, build_id)
+);
+
+comment on table prow.deck is 'full logs from prow.k8s.io/data.js';
+
+commit;
+
+select 'prow.deck table created and commented' as "Build Log";
+
+#+end_src
+
+#+RESULTS:
+: BEGIN
+: postgres=*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# CREATE TABLE
+: postgres=*# postgres=*# COMMENT
+: postgres=*# postgres=*# COMMIT
+
+** DONE Add hugsql dependency for clojure
+** DONE Write deckjob insert function
 This should fetch from data.js and then do an upsert to our table.
 
 The table is basically prow deck, keeping the job, build, results, etc.
 the primary keys are going to be the job+build_id.
-If the row we are adding matches the primary  keys, update.
+If the row we are adding matches the primary  keys, ignore.
 Otherwise, insert.
 
-We may not even need to upsert. The jobs won't change.  They're artifacts.
-So, it could be ignore, otherwise insert.
+I have gone back and forth whether this should be done via postgres or clojure.  We aren't adding anything new, we are doing a network call to data.js and then taking that full json and passing it to postgres.
 
-Alternately, we could filter the jobs to only new ones, based on the most recent job already in the table.
-Then, we just run an upsert on these new ones.
+I think, in this case, it'd be easier to do it as a function on postgres where postgres does the call.  It is only one, and removes an unecessary step.
 
-When the jobs are done, we should return a success message, or some other indicator to close the channel.
+I wrote this as 301 in our initdb.
+#+begin_src sql-mode
+begin;
+create function add_prow_deck_jobs()
+  returns text
+  language plpgsql as $$
 
-Our clojure function then will call the function and then wait for the success, sending it back up the channel when done.
+  declare affected_rows integer;
+
+begin
+
+  create temp table prow_deck_import(
+    data jsonb
+  );
+
+copy prow_deck_import from program 'curl https://prow.k8s.io/data.js | jq -c .' csv quote e'\x01' delimiter e'\x02';
+
+insert into prow.deck(refs_key, job,build_id,context,started,finished,duration,state,description,url,pod_name,agent,prow_job)
+select
+  d->>'refs_key',
+  d->>'job',
+  d->>'build_id',
+  d->>'context',
+  to_timestamp((d->>'started')::bigint),
+  case when (d->>'finished') != ''
+    then (d->>'finished')::timestamp
+  else null
+  end as finished,
+  d->>'duration',
+  d->>'state',
+  d->>'description',
+  d->>'url',
+  d->>'pod_name',
+  d->>'agent',
+  d->>'prow_job'
+  from prow_deck_import deck,
+       jsonb_array_elements(deck.data) d
+on conflict do nothing;
+
+get diagnostics affected_rows = ROW_COUNT;
+
+drop table prow_deck_import;
+
+return 'Inserted '||affected_rows||' new jobs into prow deck';
+  end
+  $$;
+
+comment on function add_prow_deck_jobs is 'adds jobs from prow.k8s.io/data.js, ignoring any existing jobs';
+
+commit;
+#+end_src
+
+#+begin_src sql-mode
+select * from add_prow_deck_jobs();
+#+end_src
+
+#+RESULTS:
+:          add_prow_deck_jobs
+: ------------------------------------
+:  Inserted 0 new jobs into prow deck
+: (1 row)
+:
+
+* select successful jobs
+
+#+begin_src sql-mode
+create extension hstore;
+#+end_src
+
+#+RESULTS:
+: CREATE EXTENSION
+
+#+begin_src sql-mode
+#+end_src
+
+#+begin_src sql-mode
+begin;
+create or replace view prow.latest_success as
+select job,build_id,url
+  from
+    (select distinct on (job) *
+       from prow.deck
+      where state = 'success'
+      order by job, finished) as latest_success;
+commit;
+#+end_src
+
+#+RESULTS:
+: BEGIN
+: postgres=*# postgres-*# postgres-*# postgres-*# postgres(*# postgres(*# postgres(*# CREATE VIEW
+: postgres=*# COMMIT
+
+* select jobs older than 7 days
+#+begin_src sql-mode
+create or replace function delete_old_deck_results()
+  returns trigger
+  language plpgsql
+as $$
+begin
+  delete from prow.deck
+   where finished < now() - interval '7 days';
+  return new;
+end;
+$$;
+#+end_src
+
+#+RESULTS:
+: postgres$# postgres$# postgres$# postgres$# postgres$# postgres$# CREATE FUNCTION
+
+
+#+begin_src sql-mode
+drop trigger flush_prow_deck on prow.deck;
+#+end_src
+
+#+RESULTS:
+: DROP TRIGGER
+
+#+begin_src sql-mode
+create trigger flush_prow_deck
+  after insert or update on prow.deck
+  for each statement
+    execute procedure delete_old_deck_results();
+#+end_src
+
+#+RESULTS:
+: CREATE TRIGGER
+
+#+begin_src sql-mode
+select count(*) from prow.deck where finished < now() - interval '7 days';
+#+end_src
+
+#+RESULTS:
+:  count
+: -------
+:    160
+: (1 row)
+:
+
+#+begin_src sql-mode
+select count(*) from prow.deck;
+#+end_src
+
+#+RESULTS:
+:  count
+: -------
+:  33732
+: (1 row)
+:
+
+#+begin_src sql-mode
+select * from add_prow_deck_jobs();
+#+end_src
+
+#+RESULTS:
+:            add_prow_deck_jobs
+: ----------------------------------------
+:  Inserted 13886 new jobs into prow deck
+: (1 row)
+:
+
+#+begin_src sql-mode
+select count(*) from prow.deck where finished < now() - interval '7 days';
+#+end_src
+
+#+RESULTS:
+:  count
+: -------
+:      0
+: (1 row)
+:
+
+* Ensure program runs until work is completed.
+for the prow deck, we can just set it as a println, to ensure that it waits for the result before calling this println fucntion.  it's a blocking job, though.
+
 * delete old prow job results
 This may be part of our loading function, with the idea that we update the data once a day when running sideloader on a schedule.
 This job then will delete from the prow job db any job older than 7 days.
 * load prow job artifacts
+
+
+#+begin_src sql-mode
+begin;
+
+create table prow.artifact(
+  id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  job text,
+  build_id text,
+  url text unique,
+  size text,
+  modified text,
+  data jsonb,
+  raw_data text,
+  filetype text,
+  foreign key (job,build_id) references prow.deck(job,build_id)
+);
+
+comment on table  prow.artifact is 'every artifact link for the most recent successful prow jobs';
+comment on column prow.artifact.id is 'auto generated row id';
+comment on column prow.artifact.job is 'job this artifact applies to';
+comment on column prow.artifact.build_id is 'id of specific running of this job';
+comment on column prow.artifact.url is 'url of artifact';
+comment on column prow.artifact.size is 'size in bytes of artifact';
+comment on column prow.artifact.modified is 'last modified date of artifact';
+comment on column prow.artifact.data  is 'jsonb of file contents. if text, will be under content key';
+comment on column prow.artifact.raw_data  is 'the actual text that is in the log. Most important with yaml, as we convert yaml to json automatically';
+comment on column prow.artifact.filetype is 'is it json,yaml, or text';
+
+commit;
+
+select 'prow.artifact table created and commented' as "Build Log";
+#+end_src
+
+#+RESULTS:
+#+begin_example
+BEGIN
+postgres=*# postgres=*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# CREATE TABLE
+postgres=*# postgres=*# COMMENT
+postgres=*# COMMENT
+postgres=*# COMMENT
+postgres=*# COMMENT
+postgres=*# COMMENT
+postgres=*# COMMENT
+postgres=*# COMMENT
+postgres=*# COMMENT
+postgres=*# COMMENT
+postgres=*# COMMENT
+postgres=*# postgres=*# COMMIT
+#+end_example
+
+
+#+begin_src sql-mode
+begin;
+create or replace function add_prow_artifact(
+  job text,
+  build_id text,
+  url text,
+  size text,
+  modified text,
+  data text,
+  raw_data text,
+  filetype text
+)
+  returns text
+  language plpgsql as $$
+  #variable_conflict use_column
+
+begin
+  insert into prow.artifact(
+    job,
+    build_id,
+    url,
+    size,
+    modified,
+    data,
+    raw_data,
+    filetype)
+
+  values(
+    job,
+    build_id,
+    url,
+    size,
+    modified,
+    data::jsonb,
+    raw_data,
+    filetype)
+    on conflict(url) do nothing;
+
+  return 'Added '||job||'/'||build_id;
+end;
+$$;
+commit;
+#+end_src
+
+#+RESULTS:
+: BEGIN
+: postgres=*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres(*# postgres-*# postgres-*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# postgres$*# CREATE FUNCTION
+: postgres=*# COMMIT
+
 * load sigs.yaml
 This should be able to be done repeatedly, updating the appropriate tables with the newest data.
 If this is a way to help assign tasks based on the prow jobs, then we dont' need historic info about the sigs at some commit.
@@ -39,3 +346,25 @@ If the two differ, than do an upsert, updating data if it's different
 Then it does an upsert to our table.
 The upsert says "if "
 * load owners file
+* scratch
+#+begin_src sql-mode
+select job,build_id,url from prow.latest_success limit 1;
+#+end_src
+
+#+RESULTS:
+:             job            |      build_id       |                                                url
+: ---------------------------+---------------------+---------------------------------------------------------------------------------------------------
+:  apisnoop-conformance-gate | 1637222543100219392 | https://prow.k8s.io/view/gs/kubernetes-jenkins/logs/apisnoop-conformance-gate/1637222543100219392
+: (1 row)
+:
+
+#+begin_src sql-mode
+select count(*) from prow.artifact;
+#+end_src
+
+#+RESULTS:
+:  count 
+: -------
+:     60
+: (1 row)
+:
