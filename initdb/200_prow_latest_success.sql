@@ -7,5 +7,5 @@ select job,build_id,url
       where state = 'success'
       order by job, finished) as latest_success;
 
-comment on view prow.latest_success as 'The most recent successful build of each job in prow.deck';
+comment on view prow.latest_success is 'The most recent successful build of each job in prow.deck';
 commit;
