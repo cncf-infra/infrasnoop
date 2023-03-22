@@ -71,7 +71,7 @@
         artifacts-sans-pkgs (filter #(or (not (str/ends-with? (:url %) "bin/"))
                                          (not (str/ends-with? (:url %) "pkg/"))
                                       ) artifacts-at-level)]
-    (map #(if (str/ends-with? (:url %) "/")
+    (pmap #(if (str/ends-with? (:url %) "/")
             (get-all-artifacts (:url %))
             %) artifacts-sans-pkgs)))
 
@@ -79,17 +79,11 @@
   "given a job map, add an artifact key with all artifact urls in that job's gcs bucket"
   [job]
   (let [artifacts (flatten (get-all-artifacts (:url job)))]
-    (assoc job :artifacts artifacts)))
-
-
-(defn artifact+metadata
-  "add job, build_id, filetype to eact artifact of a job and return list of artifacts"
-  [job]
-  (map #(assoc %
-               :job (:job job)
-               :build_id (:build_id job)
-               :filetype (parse-filetype (:url %)))
-       (:artifacts job)))
+    (map #(assoc %
+                 :job (:job job)
+                 :build_id (:build_id job)
+                 :filetype (parse-filetype (:url %)))
+         artifacts)))
 
 (defn get-blob!
   [url]
@@ -161,8 +155,7 @@
   []
   (println "starting it up!")
   (println (:add_prow_deck_jobs (db/add-prow-deck-jobs db/conn)))
-  (println "Successful jobs: " (count (db/latest-successful-jobs db/conn)))
-  (let [successful-jobs (take 5 (db/latest-successful-jobs db/conn))
-        artifacts (flatten (map artifact+metadata (pmap add-artifacts successful-jobs)))]
+  (let [jobs-without-artifacts (db/successes-without-artifacts db/conn)
+        artifacts (apply concat (pmap add-artifacts jobs-without-artifacts))]
     (println "loading " (count artifacts) " artifacts")
-    (<!! (go (artifacts-pipeline artifacts)))))
+    )) ;; (<!! (go (artifacts-pipeline artifacts)))
