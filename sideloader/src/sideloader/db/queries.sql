@@ -13,7 +13,7 @@ select * from prow.deck;
 -- :doc returns the job,build_id, and url for the latest successful run of each job in our prow.deck
 select job,build_id,url from prow.latest_success;
 
--- :name successes_without_artifacts :? :*
+-- :name success-without-artifacts :? :*
 -- :doc returns the job,build_id, and url for the latest successful jobs without artifacts.
 select job,build_id,url from prow.success_without_artifacts;
 

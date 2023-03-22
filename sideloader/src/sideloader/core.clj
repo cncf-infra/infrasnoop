@@ -155,7 +155,7 @@
   []
   (println "starting it up!")
   (println (:add_prow_deck_jobs (db/add-prow-deck-jobs db/conn)))
-  (let [jobs-without-artifacts (db/successes-without-artifacts db/conn)
+  (let [jobs-without-artifacts (db/success-without-artifacts db/conn)
         artifacts (apply concat (pmap add-artifacts jobs-without-artifacts))]
     (println "loading " (count artifacts) " artifacts")
     )) ;; (<!! (go (artifacts-pipeline artifacts)))
