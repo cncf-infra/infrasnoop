@@ -20,3 +20,8 @@ select job,build_id,url from prow.success_without_artifacts;
 -- :name add-prow-artifact :<!
 -- :doc add artifact for a job and build_id
 select * from add_prow_artifact(:job, :build_id, :url, :size, :modified, :filetype);
+
+-- :name insert-artifact :! :n
+insert into prow.artifact(url,size,modified,job,build_id,data)
+values(:url,:size,:modified,:job,:build_id,:data)
+       on conflict do nothing;
