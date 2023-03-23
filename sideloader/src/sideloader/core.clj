@@ -28,7 +28,7 @@
 
 (defn get-gcs-text!
   [<job]
-  (let [job> (chan)]
+  (let [job> (chan 25)]
     (go-loop []
       (when-some [job (<! <job)]
         (let [url (url->gcs-url (:url job))]
@@ -59,7 +59,7 @@
 
 (defn gcs-text->rows
   [<job]
-  (let [rows> (chan)]
+  (let [rows> (chan 25)]
     (go-loop [] (when-some [job (<! <job)]
                   (>! rows> (select-rows job)))
              (recur))
@@ -81,26 +81,39 @@
    let [artifacts (map row->artifact-metadata rows)]
    (map #(assoc % :job job :build_id build_id) artifacts)))
 
-(defn allowed-url?
+(defn not-bin-or-pkg?
   [{:keys [url]}]
-  (or (not (str/ends-with? url "bin/"))
-      (not (str/ends-with? url "pkg/"))))
+  (and (not (str/ends-with? (str/lower-case url) "bin/"))
+       (not (str/ends-with? (str/lower-case url) "pkg/"))))
+
+(defn allowed-extension?
+  [{:keys [url]}]
+  (let [u (str/lower-case url)]
+     (or (str/ends-with? url "json")
+         (str/ends-with? url "yaml")
+         (str/ends-with? url "yml")
+         (str/ends-with? url "log")
+         (str/ends-with? url "txt")
+         (str/ends-with? url "/"))))
+
 
 (defn rows->artifact-links
   [<job]
-  (let [links> (chan)]
+  (let [links> (chan 25)]
     (go-loop []
         (when-some [job (<! <job)]
           (->> job
                get-job-artifacts
-               (filter allowed-url?)
+               (filter not-bin-or-pkg?)
+               (filter allowed-extension?)
                (>! links>)))
       (recur))
     links>))
 
+
 (defn dispatch-links
   [<links job>]
-  (let [artifact-link> (chan)
+  (let [artifact-link> (chan 25)
         dir-link? (fn [l] (str/ends-with? l "/"))]
     (go (while true
           (let [links (<! <links)]
@@ -132,7 +145,7 @@
 
 (defn insert-artifact!
   [<artifact]
-  (let [db> (chan)]
+  (let [db> (chan 25)]
     (go-loop []
       (when-some [artifact (<! <artifact)]
         (try (db/insert-artifact db/conn artifact)
@@ -146,13 +159,13 @@
   (println "starting it up!")
   (println (:add_prow_deck_jobs (db/add-prow-deck-jobs db/conn)))
 (let [jobs-without-artifacts (db/success-without-artifacts db/conn)
-      in-chan (chan)
+      in-chan (chan 50)
       text-out (get-gcs-text! in-chan)
       rows-out (gcs-text->rows text-out)
       links-out (rows->artifact-links rows-out)
       artifact-out (dispatch-links links-out in-chan)
       artifact-blob-out (get-blob artifact-out)
       db-out (insert-artifact! artifact-blob-out)]
-  (doseq [job jobs-without-artifacts]
+  (doseq [job  jobs-without-artifacts]
     (>!! in-chan job))
   (<!! (printer db-out))))
