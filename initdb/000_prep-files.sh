@@ -12,5 +12,5 @@ if ! git clone "${repo}" "${folder}" 2>/dev/null && [ -d "${folder}" ] ; then
     echo "Clone of ${repo} failed because the folder ${folder} exists"
 fi
 
-bb prowfetch.clj
+# bb prowfetch.clj
 tree -L 1 /data

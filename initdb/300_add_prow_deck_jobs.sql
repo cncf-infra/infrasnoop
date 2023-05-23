@@ -39,6 +39,8 @@ get diagnostics affected_rows = ROW_COUNT;
 
 drop table prow_deck_import;
 
+notify prow, 'new jobs added';
+
 return 'Inserted '||affected_rows||' new jobs into prow deck';
   end
   $$;
