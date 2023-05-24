@@ -86,12 +86,12 @@ func getLatestJobYamls() error {
 			}
 			defer conn.Release()
 
-			upsertCall := "call upsertJobSpec($1,$2,$3)" //job,build_id,prowspec
-			_, err = conn.Exec(context.Background(), upsertCall, job, build_id, prowspec)
+			_, err = conn.Exec(context.Background(), "call upsertJobSpec($1,$2,$3)", job, build_id, prowspec)
 			if err != nil {
-				log.Println("error adding spec: ", url, err)
+				log.Println("!!error adding spec: ", url, err)
+			} else {
+			    log.Println("added spec for ", job, ", build", build_id)
 			}
-			log.Println("added spec for ", job, ", build", build_id)
 			wg.Done()
 		}(job, build_id, url)
 	}
@@ -147,7 +147,7 @@ func prowAsJson(url string) (jsonString string, err error) {
 	}
 	yamldata, err := io.ReadAll(res.Body)
 	if err != nil {
-		err = fmt.Errorf("Error reading body of yaml: ", err)
+		err = fmt.Errorf("Error reading body of yaml: %v", err)
 		return "", err
 	}
 	jsonData, err := yaml.YAMLToJSON(yamldata)

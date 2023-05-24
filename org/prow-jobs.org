@@ -147,9 +147,20 @@ select
 (13 rows)
 #+end_example
 
+* Improving the sideloader
+Initially, I was constructing the URL to grow the prow job from where it /usually/ is.  Most often, a prow job will have an artifacts directory in storage.googleapis.com and most often that artifacts dir will have a ~prowjob.json~ in its root.
+
+Most often, but not all the time, and the errors around that were obtuse.
+
+However, all prow jobs will have a prow yaml link on their spyglass page. This link cannot be guessed by us, so instead I
+refactored our sideloading app to do a small bit of webscraping.  IT grabs the prow yaml link, then the yaml, and then converts it to a json string.  Now we are consistently adding our latest prow job specs and there should be less odd errors around it not loading.
+* Simplifying deployment
+Next, I wanted someone to be able to run our db and the sideloader with a single command.  Docker compose is already in use, and useful for this.  I wrote up a Dockerfile for our sideloader, with its trickiness of making sure we have the right certs added so we can do our fetches, and then extended the docker-compose.yml to use the sideloader.
+
+This also brought in the need for a .env file, so we added that too with a template added to this repo.
 * What next
 this is a scratch prototype.  There's several things to do next
-** ensure 100% loading
+** DONE get to 100% loading
 as detailed above
 ** Create a more ergonomic view
 we can take the raw data from the table and make a view of all the labels and annotations and other metadata to make it closer to the desired query
