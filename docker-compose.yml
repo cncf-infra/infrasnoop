@@ -1,13 +1,31 @@
 version: '3'
 services:
-  postgress-postgresql:
+  sideloader:
     platform: linux/amd64
-    image: infrasnoop:latest
+    build: ./sideloader
+    image: ii/infrasnoop-sideloader
+    container_name: infrasnoop-sideloader
+    hostname: sideloader
+    env_file:
+      - .env
+    depends_on:
+      infrasnoop:
+        condition: service_healthy
+  infrasnoop:
+    platform: linux/amd64
+    build: .
+    image: ii/infrasnoop
+    container_name: infrasnoop
+    hostname: infrasnoop
     volumes:
-      - ./initdb:/docker-entrypoint-initdb.d/
+      # - ./initdb:/docker-entrypoint-initdb.d/
       - ./data:/data
-    environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=infra
+    env_file:
+      - .env
     ports:
       - 5432:5432
+    healthcheck:
+      test: ["CMD-SHELL", "sh -c 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}'"]
+      interval: 10s
+      timeout: 3s
+      retries: 3

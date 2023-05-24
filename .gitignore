@@ -3,3 +3,6 @@
 *.log
 tmp/
 data/*.json
+.cpcache
+.nrepl-port
+.env
