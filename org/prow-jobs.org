@@ -1,5 +1,6 @@
 #+title: Prow Jobs
 #+PROPERTY: header-args:sql-mode+ :product postgres
+#+PROPERTY: header-args :eval never-export :exports both
 
 * Introduction
 Working off [infrasnoop ticket
@@ -162,10 +163,11 @@ This also brought in the need for a .env file, so we added that too with a templ
 this is a scratch prototype.  There's several things to do next
 ** DONE get to 100% loading
 as detailed above
+** DONE Simplify deployment
+Build the go client into a binary/imiage and then add it as a service to the docker-compose, so someone can just do docker-compose up and have both running.
 ** Create a more ergonomic view
 we can take the raw data from the table and make a view of all the labels and annotations and other metadata to make it closer to the desired query
 : select job from coolview where labels contain 'x' and annotations contain 'y' and cluster is not null. --this is some pseudocode
-** Simplify deployment
-Build the go client into a binary/imiage and then add it as a service to the docker-compose, so someone can just do docker-compose up and have both running.
 ** Get the coder template up
 deploy this as a coder template so others can work on it.  Would be interesting to see people's preferred ways of working with a db though as the org-mode style is a bit unique.  So I can imagine us sharing the repo before we share the template to get early feedback.
+
