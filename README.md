@@ -13,24 +13,50 @@ docker-compose up
 
 This will, by default, start up a db accessible at localhost:5432. 
 
-When it is up and running, you can load in all the prow job metadata with:
+## Our data
+
+At the moment, we have tables setup in two schemas: **prow** and **sigs**. Prow deals with data taken from prow.k8s.io and individual prow jobs.  Sigs is a sql representation of the kubernetes sigs.yaml.
+
+There will be no data from the start.   To load prow, run:
 
 ``` sql
 select * from add_prow_deck_jobs();
 ```
-
 This will load in every line of job metadtaa found at https://prow.k8s.io/
 (about 19,000 rows)
 
 In the background, our sideloader app will fetch the prowspec for all the latest
 successful jobs (about 1,900).
 
-You can then explore the data using postgres's fun operators.  For example
+To load up sigs, you can run:
 
 ``` sql
-select data->'metadata'->'labels'
-from prow.job_spec
-where data->'metadata'->'labels'?'dind-enabled';
+select * from load_sigs_tables();
 ```
 
-**NOTE:** this db is a bit rough at the moment, and there will be more customized, easier to use views coming.
+
+## Learning more
+
+We have a couple helper functions to learn the db better.  
+
+``` sql
+select * from describe_relations();
+```
+
+will list the relations and their comments across all schemas.
+
+You can also run
+
+``` sql
+select * from describe_relation('schema','relation');
+```
+
+for the comment on a specific one.
+
+Similarly, to learn about the columns, you can run
+
+``` sql
+select * from describe_columns('schema','relation');
+```
+
+Though this is basically equivalent to running ~\d schema.relation~ in psql.
