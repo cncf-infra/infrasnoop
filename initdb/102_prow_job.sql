@@ -1,5 +1,5 @@
 begin;
-create table prow.job_spec(
+create table prow.job(
   job text not null,
   build_id text not null unique,
   data jsonb,
@@ -7,11 +7,11 @@ create table prow.job_spec(
   primary key (job,build_id)
   );
 
-comment on table  prow.job_spec is 'The job definition for a prow job, taken from its prowjob.yaml';
-comment on column prow.job_spec.job is 'The prow job title. May appear multiple times.';
-comment on column prow.job_spec.build_id is 'The exact build of this job.';
-comment on column prow.job_spec.data is 'the prowjob spec as json';
+comment on table  prow.job is 'The job definition for a prow job, taken from its prowjob.yaml. Only uses latest successful jobs.';
+comment on column prow.job.job is 'The prow job title. May appear multiple times.';
+comment on column prow.job.build_id is 'The exact build of this job.';
+comment on column prow.job.data is 'the prowjob definition, literally its prowjob.json';
 
 commit;
 
-select 'prow.job_spec table created and commented' as "Build Log";
+select 'prow.job table created and commented' as "Build Log";
