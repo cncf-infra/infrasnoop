@@ -69,6 +69,6 @@ jobs:
         with:
           context: "sideloader"
           dockerfile: "sideloader/Dockerfile"
-          image_name: ${{ github.repository_owner }}/infrasnoop # it will be lowercased internally
+          image_name: ${{ github.repository_owner }}/infrasnoop-sideloader # it will be lowercased internally
           image_tag: ${{ github.ref_name }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
