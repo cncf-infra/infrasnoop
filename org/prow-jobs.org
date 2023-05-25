@@ -1,0 +1,173 @@
+#+title: Prow Jobs
+#+PROPERTY: header-args:sql-mode+ :product postgres
+#+PROPERTY: header-args :eval never-export :exports both
+
+* Introduction
+Working off [infrasnoop ticket
+2](https://github.com/cncf-infra/infrasnoop/issues/2), this is a document
+outlining the work to get useful prowjob queries in infrasnoop.
+
+The first query we wanted was to be able to filter prow jobs by labels and
+annotations and cluster, so we could see kind jobs that aren't using a cluster
+for example.
+
+* Strategy
+
+Working off the sideloader branch, which had our most recent work, we have some
+basic tables already defined.  The key one is ~prow.deck~ which has all the prow job listings
+from testgrid, plus the view ~prow.latest_success~ which filters that deck table down to the most
+recent success of each job.
+
+What we want, then, is a table holding the job spec (e.g. the prowjob yaml) for every successful job.
+
+** Getting the prowjob yaml
+
+One of the columns of ~prow.latest_success~ is the url of the prow job spyglass.
+From this URL we can go direct to the job's defining yaml.
+
+Our latest successes number nearly 2000.  So what we would want to do is, for those 2000 entries, pull
+down each of their yamls from that page.  In other words, we need to make some http requests, which is not
+something psotgres is designed to do.
+
+What we want, then, is some side program that can receive a call from postgres when it has all its data ready,
+and then pull in the yamls and insert them into a new table.
+** Listen/Notify
+Postgres has a feature that'll help us with this: [[https://www.postgresql.org/docs/current/sql-listen.html][Listen]] and [[https://www.postgresql.org/docs/current/sql-notify.html][Notify]].  Postgres can send a message on a channel and any
+clients listening on the channel will receive that message.  By adding a notify call at the end of our "load prow deck table" function,
+we can make sure our client only tries to grab job specs for successful jobs once they're all loaded.
+
+** The new go client
+I decided to revisit the sideloader idea, but using a language more likely used
+by kubematic and other kubenretes folks. So there is now a client-go folder that
+holds a basic prototype of our auxillary,network-fetching client.
+
+Our go client runs on an endless loop listening for notifications on the 'prow'
+channel. When it receives one, it runs a function to fetch the prow jobs
+definitions for all the successful jobs. Then, for each one, we upsert it into a
+newly made `prow.job_spec` table.
+
+
+** Choices in prototype
+I wanted to try to simply get the job spec.  I noticed that for the spyglass URL you can just switch out `prow.k8s.io` for `storage.googleapis.com` and in that artifacts page find a prowjob.json.  This is the prowjob yaml converted to json, which is the exact data type we want.  This was an easy, simple way to get it.
+
+However, when I run the program it has like a 10% failure rate.  There's a decent amount of prow jobs that don't have a prowjob.json file.  They ALL have a yaml that is available via link on their spyglass,k but that link is not one I can create through string-matching.
+
+So I think if we want 100% success (which we do!) then I'd need to do a bit of web-scraping.  Get the spyglass link, downloads its body and find the link to the yaml, then fetch the yamlf rom there.  Then, we'd convert yaml to json and pass that json string to postgres.
+
+This is not ideal as it adds new steps, complexities, and dependencies.  If there was some way we can guarantee the location of a prowjob.json, i'd rather use that--but I think we need to ensure 100% load of successful jobs.
+
+I also am using a simple sync.Waitgroup pattern to manage the fetching.  This allows us to fetch the 2000 jobs concurrently while ensuring all run before the program quits or anything.  This is working well enough so far, but already reads a bit woolly.  As we add additional data processing complexity, it'd probably be good to use a channels pattern instead?
+
+* Trying it out
+
+You can start up the db by running in the shell, from the root of the repo:
+
+#+begin_src sh
+docker build -t infrasnoop .
+docker-compose up
+#+end_src
+
+Then, in a new terminal window, run:
+#+begin_src
+cd go-client
+go run main.go
+#+end_src
+
+Now that the two are up, we can load up the jobs from the prow deck.
+
+#+begin_src sql-mode
+select * from add_prow_deck_jobs();
+#+end_src
+
+Checking the go output you'll see it starts to load up all the job specs.
+
+Once it stops, we can check out our prow.job_spec table
+
+#+begin_src sql-mode
+select count(*) from prow.job_spec;
+#+end_src
+
+#+RESULTS:
+:  count
+: -------
+:   1354
+: (1 row)
+:
+
+And start to run the queries requested.  Here is one counting kind jobs with a testgrid-tab annotation that are using a cluster (arbitrary and prolly useless query, but whatevs!)
+
+#+begin_src sql-mode
+select count(*)
+  from prow.job_spec j
+ where j.data->'metadata'->'labels'?'preset-dind-enabled'
+   and j.data->'metadata'->'annotations'?'testgrid-alert-email'
+   and data->'spec'->'cluster' is not null;
+#+end_src
+
+#+RESULTS:
+:  count
+: -------
+:    294
+: (1 row)
+
+Or, if we wanted all the annotations for the first result of that, we could do.
+#+begin_src sql-mode
+with sample_job as (
+  select *
+    from prow.job_spec j
+   where j.data->'metadata'->'labels'?'preset-dind-enabled'
+     and j.data->'metadata'->'annotations'?'testgrid-alert-email'
+     and data->'spec'->'cluster' is not null
+   limit 1
+)
+
+select
+  job,
+  jsonb_object_keys(data->'metadata'->'annotations') as annotations,
+       jsonb_object_keys(data->'metadata'->'labels') as labels
+  from sample_job;
+#+end_src
+
+#+RESULTS:
+#+begin_example
+          job          |         annotations         |           labels
+-----------------------+-----------------------------+-----------------------------
+ capz-conformance-1-25 | prow.k8s.io/job             | prow.k8s.io/id
+ capz-conformance-1-25 | testgrid-tab-name           | created-by-prow
+ capz-conformance-1-25 | prow.k8s.io/context         | prow.k8s.io/job
+ capz-conformance-1-25 | testgrid-dashboards         | prow.k8s.io/type
+ capz-conformance-1-25 | testgrid-alert-email        | preset-dind-enabled
+ capz-conformance-1-25 | testgrid-num-columns-recent | prow.k8s.io/context
+ capz-conformance-1-25 |                             | prow.k8s.io/build-id
+ capz-conformance-1-25 |                             | prow.k8s.io/refs.org
+ capz-conformance-1-25 |                             | prow.k8s.io/refs.repo
+ capz-conformance-1-25 |                             | preset-azure-cred-only
+ capz-conformance-1-25 |                             | preset-kind-volume-mounts
+ capz-conformance-1-25 |                             | prow.k8s.io/refs.base_ref
+ capz-conformance-1-25 |                             | preset-azure-anonymous-pull
+(13 rows)
+#+end_example
+
+* Improving the sideloader
+Initially, I was constructing the URL to grow the prow job from where it /usually/ is.  Most often, a prow job will have an artifacts directory in storage.googleapis.com and most often that artifacts dir will have a ~prowjob.json~ in its root.
+
+Most often, but not all the time, and the errors around that were obtuse.
+
+However, all prow jobs will have a prow yaml link on their spyglass page. This link cannot be guessed by us, so instead I
+refactored our sideloading app to do a small bit of webscraping.  IT grabs the prow yaml link, then the yaml, and then converts it to a json string.  Now we are consistently adding our latest prow job specs and there should be less odd errors around it not loading.
+* Simplifying deployment
+Next, I wanted someone to be able to run our db and the sideloader with a single command.  Docker compose is already in use, and useful for this.  I wrote up a Dockerfile for our sideloader, with its trickiness of making sure we have the right certs added so we can do our fetches, and then extended the docker-compose.yml to use the sideloader.
+
+This also brought in the need for a .env file, so we added that too with a template added to this repo.
+* What next
+this is a scratch prototype.  There's several things to do next
+** DONE get to 100% loading
+as detailed above
+** DONE Simplify deployment
+Build the go client into a binary/imiage and then add it as a service to the docker-compose, so someone can just do docker-compose up and have both running.
+** Create a more ergonomic view
+we can take the raw data from the table and make a view of all the labels and annotations and other metadata to make it closer to the desired query
+: select job from coolview where labels contain 'x' and annotations contain 'y' and cluster is not null. --this is some pseudocode
+** Get the coder template up
+deploy this as a coder template so others can work on it.  Would be interesting to see people's preferred ways of working with a db though as the org-mode style is a bit unique.  So I can imagine us sharing the repo before we share the template to get early feedback.
+

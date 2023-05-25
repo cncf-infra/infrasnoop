@@ -1,5 +1,5 @@
 begin;
-create table user_group (
+create table sigs.sig (
   id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   charter_link text,
   contact jsonb,
@@ -11,5 +11,6 @@ create table user_group (
   name text,
   subprojects jsonb
   );
+comment on table sigs.sig is 'each sig in the kubernetes sigs.yaml';
 commit;
-select 'Created user_group table' as "Build Log";
+select 'Created sigs.sig table' as "Build Log";

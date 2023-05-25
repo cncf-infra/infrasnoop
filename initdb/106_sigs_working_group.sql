@@ -1,5 +1,5 @@
 begin;
-create table sig (
+create table sigs.working_group (
   id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   charter_link text,
   contact jsonb,
@@ -9,7 +9,9 @@ create table sig (
   meetings jsonb,
   mission_statement text,
   name text,
-  subprojects jsonb
+  stakeholder_sigs jsonb
   );
+
+comment on table sigs.working_group is 'each working group in the kubernetes sigs.yaml';
 commit;
-select 'Created sig table' as "Build Log";
+select 'Created sigs.working_group table' as "Build Log";
