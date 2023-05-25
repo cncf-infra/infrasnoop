@@ -55,10 +55,10 @@ jobs:
       #     push: true
       #     tags: "${{github.repository}}:iidoom-${{github.ref_name}}"
       # https://github.com/marketplace/actions/push-to-ghcr
-      - name: Build ${{github.repository}}/sideloader-Dockerfile and publish to ${{github.repository_owner}}/infrasnoop-sideloader:${{github.ref_name}}
+      - name: Build ${{github.repository}}/sideloader/Dockerfile and publish to ${{github.repository_owner}}/infrasnoop-sideloader:${{github.ref_name}}
         uses: macbre/push-to-ghcr@master
         with:
-          context: ""
+          context: "."
           dockerfile: "Dockerfile"
           image_name: ${{ github.repository_owner }}/infrasnoop # it will be lowercased internally
           image_tag: ${{ github.ref_name }}
