@@ -45,11 +45,11 @@ func listen() {
 			log.Println("Error wiating for notification: ", err)
 		}
 		log.Println("New notification", notification.Payload)
-		log.Println("Fetching prow job specs")
+		log.Println("Fetching prow job definitions")
 		if err = getLatestJobYamls(); err != nil {
 			log.Println("Error getting job yamls: ", err)
 		}
-		log.Println("Job specs gathered. Listening...")
+		log.Println("Job definitions gathered. Listening...")
 	}
 }
 
@@ -78,7 +78,7 @@ func getLatestJobYamls() error {
 		go func(job string, build_id string, url string) {
 			prowspec, err := getProwSpec(url)
 			if err != nil {
-				log.Println("Error getting prowspec: ", err)
+				log.Println("Error getting prowjob definition: ", err)
 			}
 			conn, err := pool.Acquire(context.Background())
 			if err != nil {
@@ -86,11 +86,11 @@ func getLatestJobYamls() error {
 			}
 			defer conn.Release()
 
-			_, err = conn.Exec(context.Background(), "call upsertJobSpec($1,$2,$3)", job, build_id, prowspec)
+			_, err = conn.Exec(context.Background(), "call upsertJob($1,$2,$3)", job, build_id, prowspec)
 			if err != nil {
-				log.Println("!!error adding spec: ", url, err)
+				log.Println("!!error adding prow job definition: ", url, err)
 			} else {
-			    log.Println("added spec for ", job, ", build", build_id)
+			    log.Println("added prow job definition for ", job, ", build", build_id)
 			}
 			wg.Done()
 		}(job, build_id, url)
