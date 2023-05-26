@@ -27,9 +27,9 @@ as $$
   union
   select  table_schema as schema,
   table_name as name,
-  obj_description(('prow.'||table_name)::regclass) as description
+  obj_description(('sigs.'||table_name)::regclass) as description
   from information_schema.tables
-  where table_schema = 'prow'
+  where table_schema = 'sigs'
   group by name, table_schema
   order by schema desc, name;
   $$ language SQL;
