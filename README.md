@@ -1,6 +1,6 @@
 # Infrasnoop
 
-An early exploration into mapping work to be done in kubernetes through combining data in sigs.json and cs.k8s.io into a postgres db
+An early exploration into mapping work to be done in kubernetes through combining data in sigs.json and cs.k8s.io into a postgres db.
 # Quick start
 
 You can run the db with docker-compose. This'll start up our postgres database anda  side app used to fetch and load json as needed.
