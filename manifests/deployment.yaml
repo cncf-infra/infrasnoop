@@ -1,0 +1,38 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: infrasnoop
+  # namespace: default
+spec:
+  interval: 30m
+  url: https://github.com/cncf-infra/infrasnoop
+  ref:
+    branch: canon
+  ignore: |-
+    # exclude all
+    /*
+    # include charts directory
+    !/charts/
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta1
+kind: HelmRelease
+metadata:
+  name: infrasnoop
+  # namespace: default
+spec:
+  interval: 30m
+  releaseName: infrasnoop
+  # values:
+  #   image:
+  #     tag: "v20230619-0.2.0-584-g6289ec1"
+  chart:
+    spec:
+      chart: charts/infrasnoop
+      sourceRef:
+        kind: GitRepository
+        name: infrasnoop
+  # https://github.com/cncf/apisnoop/blob/main/charts/snoopdb/values.yaml
+  # values:
+  #   image:
+  #     repository: gcr.io/k8s-staging-apisnoop/snoopdb
+  #     tag: ""

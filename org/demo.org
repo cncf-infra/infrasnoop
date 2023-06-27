@@ -1,0 +1,449 @@
+#+title: Infra Api Snoop Demo
+#+PROPERTY: header-args:sql-mode+ :product postgres
+* Infrasnoop
+** Deployment
+#+begin_src shell
+kubectl apply -f https://raw.githubusercontent.com/cncf-infra/infrasnoop/canon/manifests/infrasnoop.yaml
+#+end_src
+** Verify
+#+begin_src shell
+kubectl get helmrelease,pod,svc
+#+end_src
+* Infrasnoop
+:PROPERTIES:
+:header-args:sql-mode+: :session infrasnoop :database infrasnoop :dbuser infrasnoop
+:END:
+** IMPORTANT
+All sql blocks in here are running in our infrasnoop session.
+However, when starting for the first time, you want to make sure you are putting in the user/db/server prompts correctly.
+They are:
+- user :: infrasnoop
+- database :: infrasnoop
+- server :: infrasnoop
+
+** Test it works
+
+We can see the relations in this db with our helper function.
+
+#+begin_src sql-mode
+select * from describe_relations();
+#+end_src
+
+#+RESULTS:
+#+begin_example
+   schema    |             name             |                                                description
+-------------+------------------------------+------------------------------------------------------------------------------------------------------------
+ testing     | audit_event                  | every event from an e2e test run, or multiple test runs.
+ testing     | endpoint_hit_by_new_test     |
+ testing     | projected_change_in_coverage |
+ testing     | untested_stable_endpoint     |
+ public      | audit_event                  | every event from an e2e test run, or multiple test runs.
+ public      | audit_event_test             | every test in the audit_log of a release
+ public      | endpoint_coverage            | Coverage info for every endpoint in a release, taken from audit events for that release
+ public      | open_api                     | endpoint details from openAPI spec
+ conformance | coverage_per_release         | How many endopoints from a release are tested today?
+ conformance | eligible_endpoint            | all current stable endpoints for which conformant tests could be written, following conformance guidelines
+ conformance | ineligible_endpoint          | endpoints ineligible for conformance testing
+ conformance | new_endpoint                 | eligible endpoints sorted by release and whether they are tested
+ conformance | progress                     | per release, the # of new, eligible endpoints and coverage ratios
+ conformance | test                         | info for each conformance test, from latest conformance.yaml
+(14 rows)
+
+#+end_example
+
+** populating the tables
+*** Load prow jobs
+#+begin_src sql-mode
+select * from add_prow_deck_jobs();
+#+end_src
+
+#+RESULTS:
+#+begin_SRC example
+           add_prow_deck_jobs
+----------------------------------------
+ Inserted 14619 new jobs into prow deck
+(1 row)
+
+#+end_SRC
+
+#+begin_src sql-mode
+select count(*) from prow.job_spec;
+#+end_src
+
+#+RESULTS:
+#+begin_SRC example
+ count
+-------
+  1088
+(1 row)
+
+#+end_SRC
+
+** Example prow queries
+*** A sanity check
+First, let's look at a prow job that we know should exist in our successful jobs: the apisnoop conformance-gate.
+
+#+begin_src sql-mode
+select job
+  from prow.job
+ where job ilike '%apisnoop%conformance%';
+#+end_src
+
+#+RESULTS:
+#+begin_SRC example
+            job
+---------------------------
+ apisnoop-conformance-gate
+(1 row)
+
+#+end_SRC
+
+And we can see when this job ran.
+
+#+begin_src sql-mode
+select job.job, started, finished
+  from prow.deck deck
+         join prow.job job using(build_id)
+ where job.job = 'apisnoop-conformance-gate';
+#+end_src
+
+#+RESULTS:
+#+begin_SRC example
+            job            |       started       |      finished
+---------------------------+---------------------+---------------------
+ apisnoop-conformance-gate | 2023-06-17 07:23:48 | 2023-06-17 07:26:43
+(1 row)
+
+#+end_SRC
+
+And some details on its spec.
+
+#+begin_src sql-mode
+select job, type, agent, cluster, prowjob_defaults, namespace
+  from prow.job_spec
+ where job = 'apisnoop-conformance-gate';
+#+end_src
+
+#+RESULTS:
+#+begin_SRC example
+            job            |    type    |    agent     |  cluster  |         prowjob_defaults         |  namespace
+---------------------------+------------+--------------+-----------+----------------------------------+-------------
+ apisnoop-conformance-gate | "periodic" | "kubernetes" | "default" | {"tenant_id": "GlobalDefaultID"} | "test-pods"
+(1 row)
+
+#+end_SRC
+
+
+We can look at its labels
+#+begin_src sql-mode
+select label,content
+  from prow.job_label
+ where job = 'apisnoop-conformance-gate';
+#+end_src
+
+#+RESULTS:
+#+begin_SRC example
+        label         |               content
+----------------------+--------------------------------------
+ prow.k8s.io/id       | 4dbb80f0-2108-4945-b8cd-9cddd39a19a6
+ created-by-prow      | true
+ prow.k8s.io/job      | apisnoop-conformance-gate
+ prow.k8s.io/type     | periodic
+ prow.k8s.io/context  |
+ prow.k8s.io/build-id | 1669969072374157312
+(6 rows)
+
+#+end_SRC
+
+And its annotations:
+
+#+begin_src sql-mode
+select annotation, content
+  from prow.job_annotation
+ where job = 'apisnoop-conformance-gate';
+#+end_src
+
+#+RESULTS:
+#+begin_SRC example
+           annotation           |                                           content
+--------------------------------+----------------------------------------------------------------------------------------------
+ description                    | "Uses APISnoop to check that new GA endpoints are conformance tested in latest e2e test run"
+ prow.k8s.io/job                | "apisnoop-conformance-gate"
+ testgrid-tab-name              | "apisnoop-conformance-gate"
+ prow.k8s.io/context            | ""
+ testgrid-dashboards            | "sig-arch-conformance"
+ test-grid-alert-email          | "kubernetes-sig-arch-conformance-test-failures@googlegroups.com"
+ testgrid-num-failures-to-alert | "1"
+(7 rows)
+
+#+end_SRC
+
+If all the above queries returned results, then our db is set up and connected and good. Now we can do some more interesting queries.
+
+*** Jobs without a cluster
+This query will show any successfully running jobs that have no cluster defined in their spec.  Ideally this number is low, and this may even return 0 results.
+
+#+begin_src sql-mode
+select job
+  from prow.job
+       join prow.job_spec spec using(job)
+ where spec.cluster is null;
+#+end_src
+
+#+RESULTS:
+#+begin_SRC example
+                     job
+----------------------------------------------
+ ci-containerd-build-1-7
+ ci-kubernetes-kind-conformance-parallel-ipv6
+ ci-kubernetes-e2e-gci-gce-slow
+(3 rows)
+
+#+end_SRC
+
+When I last ran it, I got 3 results returned.
+
+*** Jobs with dind-enabled
+
+One other thing we could look at is the number of jobs labelled with 'preset-dind-enabled'.
+#+begin_src sql-mode
+select count(job)
+  from prow.job_label
+ where label = 'preset-dind-enabled';
+#+end_src
+
+#+RESULTS:
+#+begin_SRC example
+ count
+-------
+   439
+(1 row)
+
+#+end_SRC
+
+This will be many more, likely, so I just asked for the count.
+
+you can always dive deeper by looking at the results, but limit to 25 rows or some other limit.
+
+
+**** look at all the other labels of these jobs
+For the jobs labelled with 'preset-dind-enabled', what other labels do they have?
+
+one way to ask this is to use a common table expression(cte):
+
+#+begin_src sql-mode
+with dind_jobs as (
+  select job
+    from prow.job_label
+   where label = 'preset-dind-enabled'
+)
+select job, label, content
+  from prow.job j
+       join prow.job_label l using(job)
+       join dind_jobs d using(job)
+ order by j.job, label
+ limit 25 ;
+#+end_src
+
+#+RESULTS:
+#+begin_SRC example
+                  job                   |               label               |                content
+----------------------------------------+-----------------------------------+----------------------------------------
+ build-win-soak-test-cluster            | created-by-prow                   | true
+ build-win-soak-test-cluster            | preset-azure-anonymous-pull       | true
+ build-win-soak-test-cluster            | preset-azure-cred-only            | true
+ build-win-soak-test-cluster            | preset-capz-containerd-1-7-latest | true
+ build-win-soak-test-cluster            | preset-dind-enabled               | true
+ build-win-soak-test-cluster            | preset-kind-volume-mounts         | true
+ build-win-soak-test-cluster            | preset-service-account            | true
+ build-win-soak-test-cluster            | prow.k8s.io/build-id              | 1670235079059705856
+ build-win-soak-test-cluster            | prow.k8s.io/context               |
+ build-win-soak-test-cluster            | prow.k8s.io/id                    | 5f322e9d-d8ee-4845-b597-935d0c4ba4b3
+ build-win-soak-test-cluster            | prow.k8s.io/job                   | build-win-soak-test-cluster
+ build-win-soak-test-cluster            | prow.k8s.io/refs.base_ref         | main
+ build-win-soak-test-cluster            | prow.k8s.io/refs.org              | kubernetes-sigs
+ build-win-soak-test-cluster            | prow.k8s.io/refs.repo             | cluster-api-provider-azure
+ build-win-soak-test-cluster            | prow.k8s.io/type                  | periodic
+ canary-e2e-gce-cloud-provider-disabled | created-by-prow                   | true
+ canary-e2e-gce-cloud-provider-disabled | preset-dind-enabled               | true
+ canary-e2e-gce-cloud-provider-disabled | preset-k8s-ssh                    | true
+ canary-e2e-gce-cloud-provider-disabled | preset-pull-kubernetes-e2e        | true
+ canary-e2e-gce-cloud-provider-disabled | preset-pull-kubernetes-e2e-gce    | true
+ canary-e2e-gce-cloud-provider-disabled | preset-service-account            | true
+ canary-e2e-gce-cloud-provider-disabled | prow.k8s.io/build-id              | 1670028715809050624
+ canary-e2e-gce-cloud-provider-disabled | prow.k8s.io/context               |
+ canary-e2e-gce-cloud-provider-disabled | prow.k8s.io/id                    | ad257058-3ced-4003-b5bd-dbe1a19c3656
+ canary-e2e-gce-cloud-provider-disabled | prow.k8s.io/job                   | canary-e2e-gce-cloud-provider-disabled
+(25 rows)
+
+#+end_SRC
+
+We can do a frequency count for the types of labels (note: this prolly isn't an interesting query, but useful for showing some sql tricks)
+
+#+begin_src sql-mode
+with dind_jobs as (
+  select job
+    from prow.job_label
+   where label = 'preset-dind-enabled'
+)
+select distinct label, count(distinct job)
+  from prow.job j
+       join prow.job_label l using(job)
+       join dind_jobs d using(job)
+              group by label
+ order by count desc
+ limit 50;
+#+end_src
+
+#+RESULTS:
+#+begin_SRC example
+                     label                      | count
+------------------------------------------------+-------
+ created-by-prow                                |   439
+ preset-dind-enabled                            |   439
+ prow.k8s.io/build-id                           |   439
+ prow.k8s.io/context                            |   439
+ prow.k8s.io/id                                 |   439
+ prow.k8s.io/job                                |   439
+ prow.k8s.io/type                               |   439
+ prow.k8s.io/refs.base_ref                      |   429
+ prow.k8s.io/refs.org                           |   429
+ prow.k8s.io/refs.repo                          |   429
+ preset-kind-volume-mounts                      |   299
+ preset-service-account                         |   200
+ preset-azure-cred-only                         |    89
+ preset-azure-anonymous-pull                    |    86
+ event-GUID                                     |    71
+ prow.k8s.io/refs.pull                          |    70
+ prow.k8s.io/is-optional                        |    68
+ preset-aws-credential                          |    61
+ preset-aws-ssh                                 |    61
+ preset-k8s-ssh                                 |    32
+ preset-windows-private-registry-cred           |    11
+ preset-capz-containerd-1-7-latest              |    10
+ preset-azure-capz-sa-cred                      |     9
+ preset-capz-serial-slow                        |     8
+ preset-e2e-kubemark-common                     |     8
+ preset-e2e-scalability-periodics               |     8
+ preset-capz-windows-common                     |     7
+ preset-capz-windows-2019                       |     6
+ preset-capz-gmsa-setup                         |     5
+ preset-do-credential                           |     5
+ preset-aws-credential-aws-oss-testing          |     4
+ preset-azure-cred                              |     4
+ preset-capz-containerd-1-6-latest              |     4
+ preset-e2e-scalability-periodics-master        |     4
+ preset-pull-kubernetes-e2e                     |     4
+ preset-pull-kubernetes-e2e-gce                 |     4
+ preset-azure-secrets-store-creds               |     3
+ prow.k8s.io/retest                             |     3
+ preset-azure-windows                           |     2
+ preset-bazel-remote-cache-enabled              |     2
+ preset-capz-windows-2022                       |     2
+ preset-capz-windows-common-124                 |     2
+ preset-capz-windows-common-127                 |     2
+ preset-capz-windows-parallel                   |     2
+ preset-cluster-api-provider-vsphere-e2e-config |     2
+ preset-cluster-api-provider-vsphere-gcs-creds  |     2
+ created-by-tide                                |     1
+ preset-capz-windows-azuredisk                  |     1
+ preset-capz-windows-ci-entrypoint-common-main  |     1
+ preset-capz-windows-common-125                 |     1
+(50 rows)
+
+#+end_SRC
+
+** Example: Looking into the jobs without a cluster
+Before, we found the cluster-free jobs with
+
+#+begin_src sql-mode
+select job
+  from prow.job_spec spec
+ where spec.cluster is null
+ group by job;
+#+end_src
+
+#+RESULTS:
+#+begin_SRC example
+                     job
+----------------------------------------------
+ ci-containerd-build-1-7
+ ci-kubernetes-e2e-gci-gce-slow
+ ci-kubernetes-kind-conformance-parallel-ipv6
+(3 rows)
+
+#+end_SRC
+
+this returns some # of jobs(usually 3-9)
+
+
+However, this is a bit misleading. They're "spec.cluster" value is null, but it's because there is no spec! We can see this when we try to look at the raw data.
+
+#+begin_src sql-mode
+select job, data
+  from prow.job
+       join prow.job_spec spec using(job)
+ where spec.cluster is null;
+#+end_src
+
+#+RESULTS:
+#+begin_SRC example
+                     job                      |                                               data
+----------------------------------------------+--------------------------------------------------------------------------------------------------
+ ci-containerd-build-1-7                      | {"ProwJob not found": "prowjobs.prow.k8s.io \"be24cc49-e1be-4431-8910-caaf2f45b844\" not found"}
+ ci-kubernetes-kind-conformance-parallel-ipv6 | {"ProwJob not found": "prowjobs.prow.k8s.io \"30fcf739-16b5-4492-88af-7ab6ccd2dc47\" not found"}
+ ci-kubernetes-e2e-gci-gce-slow               | {"ProwJob not found": "prowjobs.prow.k8s.io \"bcd08b57-5855-4cc8-8c3a-39883a406973\" not found"}
+(3 rows)
+
+#+end_SRC
+
+It's spec is just the note "ProwJob not found".
+
+This bit of json is being pulled direct from their spyglass link, which we can grab with the below query
+
+#+begin_src sql-mode
+select job, url
+  from prow.job
+       join prow.job_spec spec using(job)
+       join prow.deck using(job,build_id)
+ where spec.cluster is null;
+#+end_src
+
+#+RESULTS:
+#+begin_SRC example
+                     job                      |                                                         url
+----------------------------------------------+----------------------------------------------------------------------------------------------------------------------
+ ci-containerd-build-1-7                      | https://prow.k8s.io/view/gs/kubernetes-jenkins/logs/ci-containerd-build-1-7/1669944912734326784/
+ ci-kubernetes-kind-conformance-parallel-ipv6 | https://prow.k8s.io/view/gs/kubernetes-jenkins/logs/ci-kubernetes-kind-conformance-parallel-ipv6/1669944912977596416
+ ci-kubernetes-e2e-gci-gce-slow               | https://prow.k8s.io/view/gs/kubernetes-jenkins/logs/ci-kubernetes-e2e-gci-gce-slow/1669944912839184384/
+(3 rows)
+
+#+end_SRC
+
+
+Zooming out, we can organize all the successful jobs by the clusters they use.
+The row at the bottom will be for the null clusters, e.g. without prowjob
+definitions.
+
+#+begin_src sql-mode
+select cluster, count(*)
+  from prow.job_spec
+ group by cluster
+ order by count desc;
+#+end_src
+
+#+RESULTS:
+#+begin_SRC example
+            cluster             | count
+--------------------------------+-------
+ "default"                      |   705
+ "k8s-infra-prow-build"         |   164
+ "eks-prow-build-cluster"       |   141
+ "k8s-infra-prow-build-trusted" |    65
+ "test-infra-trusted"           |    10
+                                |     3
+(6 rows)
+
+#+end_SRC
+
+Is there any pattern that connects these jobs without prowjobs?
