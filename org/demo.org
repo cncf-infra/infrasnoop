@@ -1,5 +1,6 @@
 #+title: Infra Api Snoop Demo
 #+PROPERTY: header-args:sql-mode+ :product postgres
+#+STARTUP: content
 * deploy
 ** Deployment
 #+begin_src shell
@@ -10,6 +11,7 @@ kubectl apply -f https://raw.githubusercontent.com/cncf-infra/infrasnoop/canon/m
 #+begin_src shell
 kubectl get helmrelease,pod,svc
 #+end_src
+
 * automate
 ** logs
 #+begin_src tmux :session ":logs"
@@ -163,8 +165,7 @@ This will be many more, likely, so I just asked for the count.
 
 you can always dive deeper by looking at the results, but limit to 25 rows or some other limit.
 
-
-**** look at all the other labels of these jobs
+*** look at all the other labels of these jobs
 For the jobs labelled with 'preset-dind-enabled', what other labels do they have?
 
 one way to ask this is to use a common table expression(cte):
