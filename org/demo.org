@@ -1,6 +1,6 @@
-#+title: Infra Api Snoop Demo this is working
+#+title: Infra Api Snoop Demo
 #+PROPERTY: header-args:sql-mode+ :product postgres
-* Infrasnoop
+* deploy
 ** Deployment
 #+begin_src shell
 kubectl apply -f https://raw.githubusercontent.com/cncf-infra/infrasnoop/canon/manifests/infrasnoop.yaml
@@ -10,8 +10,21 @@ kubectl apply -f https://raw.githubusercontent.com/cncf-infra/infrasnoop/canon/m
 #+begin_src shell
 kubectl get helmrelease,pod,svc
 #+end_src
-
-* Infrasnoop
+* automate
+** logs
+#+begin_src tmux :session ":logs"
+kubectl logs infrasnoop-0
+#+end_src
+** infrasnoop shell
+#+begin_src tmux :session ":shell"
+kubectl exec infrasnoop-0 -ti -c infrasnoop -- bash -l
+#+end_src
+** sideloader shell
+#+begin_src tmux :session ":psql"
+psql -U infrasnoop -h infrasnoop
+select * from describe_relations();
+#+end_src
+* query
 :PROPERTIES:
 :header-args:sql-mode+: :session infrasnoop :database infrasnoop :dbuser infrasnoop
 :END:
@@ -31,7 +44,6 @@ We can see the relations in this db with our helper function.
 select * from describe_relations();
 #+end_src
 
-
 ** populating the tables
 *** Load prow jobs
 #+begin_src sql-mode
@@ -40,6 +52,17 @@ select * from add_prow_deck_jobs();
 
 #+begin_src sql-mode
 select count(*) from prow.job_spec;
+#+end_src
+
+** Jobs and their clusters
+#+begin_src sql-mode
+SELECT
+  cluster,
+  count(*) AS count,
+  CONCAT(ROUND(count(*) * 100.0 / SUM(count(*)) OVER (), 2), '%') AS percentage
+FROM prow.job_spec
+GROUP BY cluster
+ORDER BY count(*) DESC;
 #+end_src
 
 ** Example prow queries
@@ -229,3 +252,5 @@ select cluster, count(*)
 #+end_src
 
 Is there any pattern that connects these jobs without prowjobs?
+
+* Footnotes
