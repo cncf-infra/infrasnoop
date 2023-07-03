@@ -6,32 +6,10 @@
 kubectl apply -f https://raw.githubusercontent.com/cncf-infra/infrasnoop/canon/manifests/infrasnoop.yaml
 #+end_src
 
-#+RESULTS:
-#+begin_example
-helmrelease.helm.toolkit.fluxcd.io/infrasnoop unchanged
-#+end_example
-
 ** Verify
 #+begin_src shell
 kubectl get helmrelease,pod,svc
 #+end_src
-
-#+RESULTS:
-#+begin_example
-NAME                                            AGE   READY   STATUS
-helmrelease.helm.toolkit.fluxcd.io/infrasnoop   17m   True    Release reconciliation succeeded
-
-NAME               READY   STATUS    RESTARTS   AGE
-pod/infrasnoop-0   2/2     Running   0          109s
-pod/israel-hh      1/1     Running   0          27m
-
-NAME                 TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)    AGE
-service/emacs        ClusterIP   10.107.113.0    <none>        80/TCP     27m
-service/infrasnoop   ClusterIP   10.98.35.154    <none>        5432/TCP   109s
-service/novnc        ClusterIP   10.97.158.184   <none>        80/TCP     27m
-service/ttyd         ClusterIP   10.96.90.151    <none>        80/TCP     27m
-service/www          ClusterIP   10.100.2.180    <none>        80/TCP     27m
-#+end_example
 
 * Infrasnoop
 :PROPERTIES:
@@ -53,22 +31,6 @@ We can see the relations in this db with our helper function.
 select * from describe_relations();
 #+end_src
 
-#+RESULTS:
-#+begin_example
- schema |      name      |                         description
---------+----------------+-------------------------------------------------------------
- sigs   | committee      | each committee in the kubernetes sigs.yaml
- sigs   | sig            | each sig in the kubernetes sigs.yaml
- sigs   | user_group     | each usergroup in the kubernetes sigs.yaml
- sigs   | working_group  | each working group in the kubernetes sigs.yaml
- prow   | job_annotation | every annotation of a job take from the prowspec of the job
- prow   | job_label      | every label of a job take from the prowspec of the job
- prow   | job_spec       | the spec from a prowjob.json expanded into sql columns
- prow   | latest_success | The most recent successful build of each job in prow.deck
-(8 rows)
-
-#+end_example
-
 
 ** populating the tables
 *** Load prow jobs
@@ -76,23 +38,9 @@ select * from describe_relations();
 select * from add_prow_deck_jobs();
 #+end_src
 
-#+RESULTS:
-:            add_prow_deck_jobs
-: ----------------------------------------
-:  Inserted 19368 new jobs into prow deck
-: (1 row)
-:
-
 #+begin_src sql-mode
 select count(*) from prow.job_spec;
 #+end_src
-
-#+RESULTS:
-:  count
-: -------
-:   1441
-: (1 row)
-:
 
 ** Example prow queries
 *** A sanity check
@@ -104,15 +52,6 @@ select job
  where job ilike '%apisnoop%conformance%';
 #+end_src
 
-#+RESULTS:
-#+begin_SRC example
-            job
----------------------------
- apisnoop-conformance-gate
-(1 row)
-
-#+end_SRC
-
 And we can see when this job ran.
 
 #+begin_src sql-mode
@@ -122,15 +61,6 @@ select job.job, started, finished
  where job.job = 'apisnoop-conformance-gate';
 #+end_src
 
-#+RESULTS:
-#+begin_SRC example
-            job            |       started       |      finished
----------------------------+---------------------+---------------------
- apisnoop-conformance-gate | 2023-06-17 07:23:48 | 2023-06-17 07:26:43
-(1 row)
-
-#+end_SRC
-
 And some details on its spec.
 
 #+begin_src sql-mode
@@ -138,15 +68,6 @@ select job, type, agent, cluster, prowjob_defaults, namespace
   from prow.job_spec
  where job = 'apisnoop-conformance-gate';
 #+end_src
-
-#+RESULTS:
-#+begin_SRC example
-            job            |    type    |    agent     |  cluster  |         prowjob_defaults         |  namespace
----------------------------+------------+--------------+-----------+----------------------------------+-------------
- apisnoop-conformance-gate | "periodic" | "kubernetes" | "default" | {"tenant_id": "GlobalDefaultID"} | "test-pods"
-(1 row)
-
-#+end_SRC
 
 
 We can look at its labels
@@ -156,20 +77,6 @@ select label,content
  where job = 'apisnoop-conformance-gate';
 #+end_src
 
-#+RESULTS:
-#+begin_SRC example
-        label         |               content
-----------------------+--------------------------------------
- prow.k8s.io/id       | 4dbb80f0-2108-4945-b8cd-9cddd39a19a6
- created-by-prow      | true
- prow.k8s.io/job      | apisnoop-conformance-gate
- prow.k8s.io/type     | periodic
- prow.k8s.io/context  |
- prow.k8s.io/build-id | 1669969072374157312
-(6 rows)
-
-#+end_SRC
-
 And its annotations:
 
 #+begin_src sql-mode
@@ -177,21 +84,6 @@ select annotation, content
   from prow.job_annotation
  where job = 'apisnoop-conformance-gate';
 #+end_src
-
-#+RESULTS:
-#+begin_SRC example
-           annotation           |                                           content
---------------------------------+----------------------------------------------------------------------------------------------
- description                    | "Uses APISnoop to check that new GA endpoints are conformance tested in latest e2e test run"
- prow.k8s.io/job                | "apisnoop-conformance-gate"
- testgrid-tab-name              | "apisnoop-conformance-gate"
- prow.k8s.io/context            | ""
- testgrid-dashboards            | "sig-arch-conformance"
- test-grid-alert-email          | "kubernetes-sig-arch-conformance-test-failures@googlegroups.com"
- testgrid-num-failures-to-alert | "1"
-(7 rows)
-
-#+end_SRC
 
 If all the above queries returned results, then our db is set up and connected and good. Now we can do some more interesting queries.
 
@@ -202,32 +94,9 @@ This query will show any successfully running jobs that have no cluster defined 
 \d prow.job
 #+end_src
 
-#+RESULTS:
-#+begin_example
-                 Table "prow.job"
-  Column  | Type  | Collation | Nullable | Default
-----------+-------+-----------+----------+---------
- job      | text  |           | not null |
- build_id | text  |           | not null |
- data     | jsonb |           |          |
-Indexes:
-    "job_pkey" PRIMARY KEY, btree (job, build_id)
-    "job_build_id_key" UNIQUE CONSTRAINT, btree (build_id)
-Foreign-key constraints:
-    "job_job_build_id_fkey" FOREIGN KEY (job, build_id) REFERENCES prow.deck(job, build_id)
-
-#+end_example
-
 #+begin_src sql-mode
 select data->'spec'->>'cluster' from prow.job limit 1;
 #+end_src
-
-#+RESULTS:
-:  ?column?
-: ----------
-:  default
-: (1 row)
-:
 
 
 
@@ -235,34 +104,13 @@ select data->'spec'->>'cluster' from prow.job limit 1;
 #+begin_src sql-mode
 select count(*) from prow.job j where j.data->'spec'->>'cluster' = 'default';
 #+end_src
-
-#+RESULTS:
-:  count
-: -------
-:    946
-: (1 row)
-:
 #+begin_src sql-mode
 select count(*) from prow.job j join prow.job_spec spec using(job) where spec.cluster::text = '"default"';
 #+end_src
 
-#+RESULTS:
-:  count
-: -------
-:    946
-: (1 row)
-:
-
 #+begin_src sql-mode
 select job,build_id from prow.job j where j.data->'spec'->>'cluster' = 'default' limit 1;
 #+end_src
-
-#+RESULTS:
-:                         job                        |      build_id
-: ---------------------------------------------------+---------------------
-:  pull-cluster-api-provider-openstack-e2e-full-test | 1673297411717468160
-: (1 row)
-:
 
 #+begin_src sql-mode
 select jsonb_pretty(data) from prow.job j where j.data->'spec'->>'cluster' = 'default' limit 1;
@@ -272,269 +120,9 @@ select jsonb_pretty(data) from prow.job j where j.data->'spec'->>'cluster' = 'de
 select content, count(distinct job) from prow.job j join prow.job_spec spec using(job) left join prow.job_annotation using(job) where spec.cluster::text = '"default"' and annotation ilike '%alert%email%' group by content order by count desc;
 #+end_src
 
-#+RESULTS:
-#+begin_example
-                                    content                                    | count
--------------------------------------------------------------------------------+-------
- "sig-cluster-lifecycle-cluster-api-alerts@kubernetes.io"                      |    48
- "kubernetes-provider-azure@googlegroups.com"                                  |    31
- "k8s-infra-staging-cluster-api-azure@kubernetes.io"                           |    27
- "kubernetes-sig-storage-test-failures@googlegroups.com"                       |    25
- "kubernetes-provider-azure-oot@googlegroups.com"                              |    14
- "kubernetes-provider-azure@googlegroups.com, sig-windows-leads@kubernetes.io" |    14
- "kubernetes-sig-node-test-failures@googlegroups.com"                          |    13
- "k8s-testing-clusterapi-vsphere+alerts@groups.vmware.com"                     |    10
- "kubernetes-sig-network-test-failures@googlegroups.com"                       |     7
- "sig-cluster-lifecycle-cluster-api-do-alerts@kubernetes.io"                   |     5
- "zhenw@google.com,lantaol@google.com"                                         |     5
- "release-managers+alerts@kubernetes.io"                                       |     4
- "kubernetes-secrets-store-csi-driver@googlegroups.com"                        |     4
- "kubernetes-sig-cli-oncall@gmail.com"                                         |     3
- "sig-cluster-lifecycle-cluster-api-gcp-alerts@kubernetes.io"                  |     3
- "sig-cluster-lifecycle-cluster-api-openstack-alerts@kubernetes.io"            |     2
- "kubernetes-hnc-dev+alerts@googlegroups.com"                                  |     1
- "kubernetes-sig-testing-alerts@googlegroups.com, k8s-infra-oncall@google.com" |     1
- "patrick.ohly@intel.com"                                                      |     1
- "k8s-testing-cloud-provider-vsphere+alerts@groups.vmware.com"                 |     1
- "release-team@kubernetes.io"                                                  |     1
- "ehashman@redhat.com, mkmir@google.com"                                       |     1
- "colew@google.com"                                                            |     1
- "bentheelder@google.com"                                                      |     1
- "kubernetes-sig-arch-conformance-test-failures@googlegroups.com"              |     1
- "anthonytong@google.com"                                                      |     1
-(26 rows)
-
-#+end_example
-
 #+begin_src sql-mode
 select content, count(distinct job) from prow.job j join prow.job_spec spec using(job) left join prow.job_annotation using(job) where spec.cluster::text = '"default"' and annotation ilike '%dashboard%' group by content order by count desc;
 #+end_src
-
-#+RESULTS:
-#+begin_example
-                                                           content                                                           | count
------------------------------------------------------------------------------------------------------------------------------+-------
- "sig-cluster-lifecycle-cluster-api-provider-azure"                                                                          |    38
- "sig-storage-csi-ci"                                                                                                        |    23
- "google-aws, kops-distro-u2004, kops-k8s-stable, kops-latest, kops-upgrades-many-addons, sig-cluster-lifecycle-kops"        |    22
- "provider-azure-cloud-provider-azure"                                                                                       |    21
- "sig-cluster-lifecycle-cluster-api-1.4"                                                                                     |    20
- "sig-cluster-lifecycle-cluster-api"                                                                                         |    19
- "provider-azure-azuredisk-csi-driver"                                                                                       |    17
- "google-aws, kops-distro-u2004, kops-k8s-stable, kops-latest, kops-upgrades, sig-cluster-lifecycle-kops"                    |    16
- "sig-cluster-lifecycle-cluster-api-1.2"                                                                                     |    14
- "sig-auth-secrets-store-csi-driver, sig-auth-secrets-store-csi-driver-presubmit"                                            |    13
- "sig-node-containerd"                                                                                                       |    12
- "sig-cluster-lifecycle-cluster-api-1.3"                                                                                     |    12
- "provider-azure-blobfuse-csi-driver"                                                                                        |    11
- "provider-aws-ebs-csi-driver"                                                                                               |    11
- "vmware-cluster-api-provider-vsphere, sig-cluster-lifecycle-cluster-api-provider-vsphere"                                   |    10
- "provider-azure-master-signal"                                                                                              |    10
- "sig-network-gce"                                                                                                           |     8
- "google-aws, kops-distro-u2204, kops-k8s-stable, kops-latest, kops-network-plugins, sig-cluster-lifecycle-kops"             |     8
- "sig-cluster-lifecycle-kops, presubmits-kops, kops-presubmits"                                                              |     8
- "sig-scheduling"                                                                                                            |     7
- "google-aws, kops-1.27, kops-distro-u2004, kops-grid, kops-k8s-1.27, sig-cluster-lifecycle-kops"                            |     7
- "google-aws, kops-distro-u2004, kops-grid, kops-k8s-1.27, kops-latest, sig-cluster-lifecycle-kops"                          |     7
- "sig-storage-csi-other"                                                                                                     |     7
- "google-aws, kops-1.27, kops-distro-deb10, kops-grid, kops-k8s-1.27, sig-cluster-lifecycle-kops"                            |     7
- "google-aws, kops-distro-rhel8, kops-grid, kops-k8s-1.27, kops-latest, sig-cluster-lifecycle-kops"                          |     6
- "google-aws, kops-1.27, kops-distro-flatcar, kops-grid, kops-k8s-1.27, sig-cluster-lifecycle-kops"                          |     6
- "google-aws, kops-1.27, kops-distro-u2204, kops-grid, kops-k8s-1.27, sig-cluster-lifecycle-kops"                            |     6
- "google-aws, kops-distro-u2204, kops-k8s-ci, kops-latest, kops-misc, sig-cluster-lifecycle-kops"                            |     6
- "sig-testing-canaries"                                                                                                      |     6
- "sig-instrumentation-metrics-server"                                                                                        |     6
- "google-aws, kops-1.27, kops-distro-amzn2, kops-grid, kops-k8s-1.27, sig-cluster-lifecycle-kops"                            |     6
- "google-aws, kops-1.27, kops-distro-rhel8, kops-grid, kops-k8s-1.27, sig-cluster-lifecycle-kops"                            |     6
- "google-aws, kops-distro-u2204, kops-grid, kops-k8s-1.27, kops-latest, sig-cluster-lifecycle-kops"                          |     6
- "presubmits-node-problem-detector"                                                                                          |     6
- "google-aws, kops-distro-deb10, kops-grid, kops-k8s-1.27, kops-latest, sig-cluster-lifecycle-kops"                          |     6
- "sig-release-job-config-errors, sig-cli-master"                                                                             |     6
- "sig-cluster-lifecycle-cluster-api-provider-openstack"                                                                      |     6
- "provider-azure-cloud-provider-azure-1-26-presubmit"                                                                        |     5
- "provider-azure-1.25-signal"                                                                                                |     5
- "provider-azure-1.26-signal"                                                                                                |     5
- "provider-azure-1.27-signal"                                                                                                |     5
- "provider-azure-azurefile-csi-driver"                                                                                       |     5
- "sig-storage-csi-external-provisioner"                                                                                      |     5
- "sig-node-node-problem-detector"                                                                                            |     5
- "google-aws, kops-distro-amzn2, kops-grid, kops-k8s-1.27, kops-latest, sig-cluster-lifecycle-kops"                          |     5
- "sig-testing-misc"                                                                                                          |     5
- "google-aws, kops-distro-flatcar, kops-grid, kops-k8s-1.27, kops-latest, sig-cluster-lifecycle-kops"                        |     5
- "sig-cluster-lifecycle-cluster-api-provider-gcp"                                                                            |     5
- "sig-cluster-lifecycle-cluster-api-provider-digitalocean"                                                                   |     5
- "sig-cli-master"                                                                                                            |     5
- "sig-autoscaling-vpa"                                                                                                       |     5
- "provider-gcp-compute-persistent-disk-csi-driver"                                                                           |     5
- "provider-azure-cloud-provider-azure-1-27-presubmit"                                                                        |     5
- "google-aws, kops-1.27, kops-distro-u2204, kops-grid, kops-k8s-1.25, sig-cluster-lifecycle-kops"                            |     4
- "google-aws, kops-1.27, kops-distro-u2204, kops-grid, kops-k8s-1.26, sig-cluster-lifecycle-kops"                            |     4
- "google-aws, kops-1.26, kops-distro-deb10, kops-grid, kops-k8s-1.23, sig-cluster-lifecycle-kops"                            |     4
- "sig-auth-secrets-store-csi-driver, sig-auth-secrets-store-csi-driver-postsubmit"                                           |     4
- "sig-node-kubelet"                                                                                                          |     4
- "google-aws, kops-distro-amzn2, kops-grid, kops-k8s-1.23, kops-latest, sig-cluster-lifecycle-kops"                          |     4
- "google-aws, kops-distro-amzn2, kops-grid, kops-k8s-1.24, kops-latest, sig-cluster-lifecycle-kops"                          |     4
- "google-aws, kops-distro-amzn2, kops-grid, kops-k8s-1.25, kops-latest, sig-cluster-lifecycle-kops"                          |     4
- "google-aws, kops-distro-amzn2, kops-grid, kops-k8s-1.26, kops-latest, sig-cluster-lifecycle-kops"                          |     4
- "sig-auth-secrets-store-csi-driver, sig-auth-secrets-store-csi-driver-periodic"                                             |     4
- "sig-node-cri-o"                                                                                                            |     4
- "google-aws, kops-distro-deb10, kops-grid, kops-k8s-1.23, kops-latest, sig-cluster-lifecycle-kops"                          |     4
- "google-aws, kops-distro-deb10, kops-grid, kops-k8s-1.24, kops-latest, sig-cluster-lifecycle-kops"                          |     4
- "sig-windows-master-release"                                                                                                |     4
- "google-aws, kops-distro-deb10, kops-grid, kops-k8s-1.26, kops-latest, sig-cluster-lifecycle-kops"                          |     4
- "google-aws, kops-1.27, kops-distro-deb10, kops-grid, kops-k8s-1.26, sig-cluster-lifecycle-kops"                            |     4
- "sig-node-containerd,containerd-periodic"                                                                                   |     4
- "google-aws, kops-1.26, kops-distro-amzn2, kops-grid, kops-k8s-1.25, sig-cluster-lifecycle-kops"                            |     4
- "sig-network-ingress-gce-e2e"                                                                                               |     4
- "google-aws, kops-1.27, kops-distro-deb10, kops-grid, kops-k8s-1.23, sig-cluster-lifecycle-kops"                            |     4
- "google-aws, kops-1.27, kops-distro-amzn2, kops-grid, kops-k8s-1.26, sig-cluster-lifecycle-kops"                            |     4
- "sig-api-machinery-structured-merge-diff"                                                                                   |     4
- "google-aws, kops-1.26, kops-distro-amzn2, kops-grid, kops-k8s-1.24, sig-cluster-lifecycle-kops"                            |     4
- "google-aws, kops-1.27, kops-distro-amzn2, kops-grid, kops-k8s-1.25, sig-cluster-lifecycle-kops"                            |     4
- "google-aws, kops-1.27, kops-distro-amzn2, kops-grid, kops-k8s-1.23, sig-cluster-lifecycle-kops"                            |     4
- "google-aws, kops-1.26, kops-distro-rhel8, kops-grid, kops-k8s-1.23, sig-cluster-lifecycle-kops"                            |     4
- "google-aws, kops-1.26, kops-distro-u2204, kops-grid, kops-k8s-1.26, sig-cluster-lifecycle-kops"                            |     4
- "google-aws, kops-distro-rhel8, kops-grid, kops-k8s-1.23, kops-latest, sig-cluster-lifecycle-kops"                          |     4
- "google-aws, kops-distro-rhel8, kops-grid, kops-k8s-1.24, kops-latest, sig-cluster-lifecycle-kops"                          |     4
- "google-aws, kops-distro-rhel8, kops-grid, kops-k8s-1.25, kops-latest, sig-cluster-lifecycle-kops"                          |     4
- "google-aws, kops-distro-rhel8, kops-grid, kops-k8s-1.26, kops-latest, sig-cluster-lifecycle-kops"                          |     4
- "google-aws, kops-1.26, kops-distro-u2204, kops-grid, kops-k8s-1.25, sig-cluster-lifecycle-kops"                            |     4
- "google-aws, kops-1.26, kops-distro-u2204, kops-grid, kops-k8s-1.24, sig-cluster-lifecycle-kops"                            |     4
- "google-aws, kops-distro-u2204, kops-k8s-stable, kops-latest, kops-misc, sig-cluster-lifecycle-kops"                        |     4
- "google-aws, kops-1.26, kops-distro-rhel8, kops-grid, kops-k8s-1.25, sig-cluster-lifecycle-kops"                            |     4
- "google-aws, kops-1.26, kops-distro-u2204, kops-grid, kops-k8s-1.23, sig-cluster-lifecycle-kops"                            |     4
- "google-aws, kops-distro-u2004, kops-grid, kops-k8s-1.23, kops-latest, sig-cluster-lifecycle-kops"                          |     4
- "google-aws, kops-distro-u2004, kops-grid, kops-k8s-1.24, kops-latest, sig-cluster-lifecycle-kops"                          |     4
- "google-aws, kops-distro-u2004, kops-grid, kops-k8s-1.25, kops-latest, sig-cluster-lifecycle-kops"                          |     4
- "google-aws, kops-distro-u2004, kops-grid, kops-k8s-1.26, kops-latest, sig-cluster-lifecycle-kops"                          |     4
- "google-aws, kops-1.26, kops-distro-u2004, kops-grid, kops-k8s-1.26, sig-cluster-lifecycle-kops"                            |     4
- "google-aws, kops-1.26, kops-distro-u2004, kops-grid, kops-k8s-1.25, sig-cluster-lifecycle-kops"                            |     4
- "google-aws, kops-1.26, kops-distro-u2004, kops-grid, kops-k8s-1.24, sig-cluster-lifecycle-kops"                            |     4
- "google-aws, kops-1.26, kops-distro-u2004, kops-grid, kops-k8s-1.23, sig-cluster-lifecycle-kops"                            |     4
- "provider-azure-1.24-signal"                                                                                                |     4
- "google-aws, kops-distro-u2204, kops-grid, kops-k8s-1.23, kops-latest, sig-cluster-lifecycle-kops"                          |     4
- "google-aws, kops-distro-u2204, kops-grid, kops-k8s-1.24, kops-latest, sig-cluster-lifecycle-kops"                          |     4
- "google-aws, kops-distro-u2204, kops-grid, kops-k8s-1.25, kops-latest, sig-cluster-lifecycle-kops"                          |     4
- "google-aws, kops-distro-u2204, kops-grid, kops-k8s-1.26, kops-latest, sig-cluster-lifecycle-kops"                          |     4
- "provider-aws-efs-csi-driver"                                                                                               |     4
- "presubmits-alibaba-cloud-csi-driver"                                                                                       |     4
- "kops-presubmits, presubmits-kops, sig-cluster-lifecycle-kops"                                                              |     4
- "google-aws, kops-1.26, kops-distro-rhel8, kops-grid, kops-k8s-1.24, sig-cluster-lifecycle-kops"                            |     4
- "google-gce"                                                                                                                |     4
- "kops-distro-u2004, kops-gce, kops-grid, kops-k8s-1.27, kops-latest, sig-cluster-lifecycle-kops"                            |     4
- "google-aws, kops-1.26, kops-distro-rhel8, kops-grid, kops-k8s-1.26, sig-cluster-lifecycle-kops"                            |     4
- "google-aws, kops-1.27, kops-distro-rhel8, kops-grid, kops-k8s-1.25, sig-cluster-lifecycle-kops"                            |     4
- "google-aws, kops-1.27, kops-distro-rhel8, kops-grid, kops-k8s-1.26, sig-cluster-lifecycle-kops"                            |     4
- "google-aws, kops-1.27, kops-distro-rhel8, kops-grid, kops-k8s-1.24, sig-cluster-lifecycle-kops"                            |     4
- "google-aws, kops-1.26, kops-distro-amzn2, kops-grid, kops-k8s-1.23, sig-cluster-lifecycle-kops"                            |     4
- "google-aws, kops-1.27, kops-distro-u2004, kops-grid, kops-k8s-1.24, sig-cluster-lifecycle-kops"                            |     4
- "google-aws, kops-1.27, kops-distro-u2004, kops-grid, kops-k8s-1.25, sig-cluster-lifecycle-kops"                            |     4
- "google-aws, kops-1.27, kops-distro-u2004, kops-grid, kops-k8s-1.26, sig-cluster-lifecycle-kops"                            |     4
- "google-aws, kops-1.26, kops-distro-deb10, kops-grid, kops-k8s-1.24, sig-cluster-lifecycle-kops"                            |     4
- "google-aws, kops-1.27, kops-distro-u2204, kops-grid, kops-k8s-1.23, sig-cluster-lifecycle-kops"                            |     4
- "google-aws, kops-1.27, kops-distro-u2204, kops-grid, kops-k8s-1.24, sig-cluster-lifecycle-kops"                            |     4
- "google-aws, kops-1.27, kops-distro-amzn2, kops-grid, kops-k8s-1.24, sig-cluster-lifecycle-kops"                            |     3
- "google-aws, kops-1.26, kops-distro-amzn2, kops-grid, kops-k8s-1.26, sig-cluster-lifecycle-kops"                            |     3
- "google-aws, kops-1.26, kops-distro-deb10, kops-grid, kops-k8s-1.25, sig-cluster-lifecycle-kops"                            |     3
- "google-aws, kops-1.26, kops-distro-flatcar, kops-grid, kops-k8s-1.24, sig-cluster-lifecycle-kops"                          |     3
- "google-aws, kops-1.27, kops-distro-deb10, kops-grid, kops-k8s-1.24, sig-cluster-lifecycle-kops"                            |     3
- "google-aws, kops-1.27, kops-distro-deb10, kops-grid, kops-k8s-1.25, sig-cluster-lifecycle-kops"                            |     3
- "google-aws, kops-1.27, kops-distro-flatcar, kops-grid, kops-k8s-1.23, sig-cluster-lifecycle-kops"                          |     3
- "google-aws, kops-1.27, kops-distro-rhel8, kops-grid, kops-k8s-1.23, sig-cluster-lifecycle-kops"                            |     3
- "google-aws, kops-1.27, kops-distro-u2004, kops-grid, kops-k8s-1.23, sig-cluster-lifecycle-kops"                            |     3
- "google-aws, kops-distro-deb10, kops-grid, kops-k8s-1.25, kops-latest, sig-cluster-lifecycle-kops"                          |     3
- "google-aws, kops-distro-flatcar, kops-grid, kops-k8s-1.23, kops-latest, sig-cluster-lifecycle-kops"                        |     3
- "google-aws, kops-distro-flatcar, kops-grid, kops-k8s-1.24, kops-latest, sig-cluster-lifecycle-kops"                        |     3
- "google-aws, kops-distro-flatcar, kops-grid, kops-k8s-1.25, kops-latest, sig-cluster-lifecycle-kops"                        |     3
- "google-aws, kops-distro-flatcar, kops-grid, kops-k8s-1.26, kops-latest, sig-cluster-lifecycle-kops"                        |     3
- "kops-distro-u2004, kops-gce, kops-grid, kops-k8s-1.23, kops-latest, sig-cluster-lifecycle-kops"                            |     3
- "kops-distro-u2004, kops-gce, kops-grid, kops-k8s-1.24, kops-latest, sig-cluster-lifecycle-kops"                            |     3
- "kops-distro-u2004, kops-gce, kops-grid, kops-k8s-1.25, kops-latest, sig-cluster-lifecycle-kops"                            |     3
- "kops-distro-u2004, kops-gce, kops-grid, kops-k8s-1.26, kops-latest, sig-cluster-lifecycle-kops"                            |     3
- "sig-autoscaling-hpa"                                                                                                       |     3
- "sig-cluster-lifecycle-image-builder"                                                                                       |     3
- "sig-node-containerd,containerd-presubmits"                                                                                 |     3
- "sig-node-release-blocking"                                                                                                 |     3
- "sig-testing-maintenance"                                                                                                   |     3
- "sig-windows-soak-tests"                                                                                                    |     3
- "sig-cluster-lifecycle-cluster-api-provider-nested"                                                                         |     2
- "sig-release-releng-informing"                                                                                              |     2
- "sig-release-releng-presubmits"                                                                                             |     2
- "sig-scalability-experiments"                                                                                               |     2
- "google-aws, kops-1.27, kops-distro-flatcar, kops-grid, kops-k8s-1.25, sig-cluster-lifecycle-kops"                          |     2
- "google-aws, kops-1.27, kops-distro-flatcar, kops-grid, kops-k8s-1.24, sig-cluster-lifecycle-kops"                          |     2
- "google-aws, kops-1.25, kops-conformance, kops-distro-u2204, kops-k8s-1.25, sig-cluster-lifecycle-kops"                     |     2
- "google-aws, kops-1.26, kops-distro-flatcar, kops-grid, kops-k8s-1.26, sig-cluster-lifecycle-kops"                          |     2
- "google-aws, kops-distro-u2204, kops-distros, kops-k8s-stable, kops-latest, sig-cluster-lifecycle-kops"                     |     2
- "google-aws, kops-1.26, kops-distro-flatcar, kops-grid, kops-k8s-1.25, sig-cluster-lifecycle-kops"                          |     2
- "google-aws, kops-distro-u2204, kops-k8s-1.26, kops-latest, kops-versions, sig-cluster-lifecycle-kops"                      |     2
- "sig-cluster-lifecycle-kops, kops-presubmits"                                                                               |     2
- "google-aws, kops-1.26, kops-distro-flatcar, kops-grid, kops-k8s-1.23, sig-cluster-lifecycle-kops"                          |     2
- "sig-network-ingress-nginx"                                                                                                 |     2
- "sig-network-policy-api"                                                                                                    |     2
- "sig-node-presubmits"                                                                                                       |     2
- "google-aws, kops-1.26, kops-distro-deb10, kops-grid, kops-k8s-1.26, sig-cluster-lifecycle-kops"                            |     2
- "sig-windows-master-release, sig-windows-signal"                                                                            |     2
- "google-aws, kops-1.26, kops-conformance, kops-distro-u2204, kops-k8s-1.26, sig-cluster-lifecycle-kops"                     |     2
- "sig-api-machinery-network-proxy"                                                                                           |     2
- "google-aws, kops-distro-u2004, kops-distros, kops-k8s-stable, kops-latest, sig-cluster-lifecycle-kops"                     |     2
- "google-aws, kops-distro-u2204, kops-k8s-1.27, kops-latest, kops-versions, sig-cluster-lifecycle-kops"                      |     2
- "sig-windows-presubmit"                                                                                                     |     2
- "google-aws, kops-1.27, kops-distro-flatcar, kops-grid, kops-k8s-1.26, sig-cluster-lifecycle-kops"                          |     2
- "sig-node-cadvisor"                                                                                                         |     1
- "google-aws, kops-distro-deb11, kops-k8s-ci, kops-latest, kops-network-plugins, sig-cluster-lifecycle-kops"                 |     1
- "google-aws, kops-distro-deb11, kops-distros, kops-k8s-stable, kops-latest, sig-cluster-lifecycle-kops"                     |     1
- "wg-multi-tenancy-hnc"                                                                                                      |     1
- "google-aws, kops-distro-deb10, kops-distros, kops-k8s-stable, kops-latest, sig-cluster-lifecycle-kops"                     |     1
- "sig-node-cri-o, sig-node-release-blocking"                                                                                 |     1
- "sig-node-cri-o, sig-release-master-informing, sig-node-release-blocking"                                                   |     1
- "sig-node-dynamic-resource-allocation"                                                                                      |     1
- "google-aws, kops-distro-amzn2, kops-distros, kops-k8s-stable, kops-latest, sig-cluster-lifecycle-kops"                     |     1
- "google-aws, kops-distro-al2023, kops-distros, kops-k8s-stable, kops-latest, sig-cluster-lifecycle-kops"                    |     1
- "sig-release-1.24-informing, sig-windows-1.24-release, sig-windows-signal"                                                  |     1
- "sig-release-1.25-informing, sig-windows-1.25-release, sig-windows-signal"                                                  |     1
- "sig-release-1.26-informing, sig-windows-signal,  sig-windows-1.26-release"                                                 |     1
- "sig-release-1.27-informing, sig-windows-signal,  sig-windows-1.27-release"                                                 |     1
- "sig-release-master-informing, sig-windows-master-release, sig-windows-signal"                                              |     1
- "sig-storage-local-static-provisioner"                                                                                      |     1
- "sig-testing-kind"                                                                                                          |     1
- "vmware-postsubmits-vsphere-csi-driver"                                                                                     |     1
- "sig-windows-1.24-release"                                                                                                  |     1
- "sig-windows-1.25-release"                                                                                                  |     1
- "sig-windows-1.26-release, sig-windows-signal"                                                                              |     1
- "presubmits-misc"                                                                                                           |     1
- "google-gce, sig-storage-kubernetes"                                                                                        |     1
- "google-gce, sig-network-gce"                                                                                               |     1
- "google-gce, google-gci"                                                                                                    |     1
- "google-aws, kops-k8s-stable, kops-latest, sig-cluster-lifecycle-kops, kops-misc"                                           |     1
- "sig-api-machinery-kubebuilder"                                                                                             |     1
- "google-aws, kops-distro-u2204, kops-k8s-latest, kops-latest, kops-versions, sig-cluster-lifecycle-kops"                    |     1
- "google-aws, kops-distro-u2204, kops-k8s-latest, kops-latest, kops-misc, sig-cluster-lifecycle-kops"                        |     1
- "sig-arch-conformance"                                                                                                      |     1
- "sig-auth-encryption-at-rest"                                                                                               |     1
- "sig-auth-encryption-at-rest, sig-release-master-informing"                                                                 |     1
- "google-aws, kops-distro-u2204, kops-k8s-ci, kops-latest, sig-cluster-lifecycle-kops"                                       |     1
- "google-aws, kops-distro-u2204, kops-k8s-ci, kops-latest, kops-versions, sig-cluster-lifecycle-kops"                        |     1
- "google-aws, kops-distro-u2204, kops-k8s-1.25, kops-latest, kops-versions, sig-cluster-lifecycle-kops"                      |     1
- "google-aws, kops-distro-u2204, kops-k8s-1.24, kops-latest, kops-versions, sig-cluster-lifecycle-kops"                      |     1
- "google-aws, kops-distro-u2204, kops-k8s-1.23, kops-latest, kops-versions, sig-cluster-lifecycle-kops"                      |     1
- "google-aws, kops-distro-u2004, kops-k8s-stable, kops-latest, kops-network-plugins, sig-cluster-lifecycle-kops"             |     1
- "sig-cluster-lifecycle-cluster-api-operator"                                                                                |     1
- "google-aws, kops-distro-rocky8, kops-distros, kops-k8s-stable, kops-latest, sig-cluster-lifecycle-kops"                    |     1
- "google-aws, kops-distro-rhel9, kops-distros, kops-k8s-stable, kops-latest, sig-cluster-lifecycle-kops"                     |     1
- "google-aws, kops-distro-rhel8, kops-k8s-ci, kops-latest, sig-cluster-lifecycle-kops"                                       |     1
- "sig-windows-signal"                                                                                                        |     1
- "google-aws, kops-distro-rhel8, kops-distros, kops-k8s-stable, kops-latest, sig-cluster-lifecycle-kops"                     |     1
- "sig-contribex-slack-infra"                                                                                                 |     1
- "google-aws, kops-distro-flatcar, kops-distros, kops-k8s-stable, kops-latest, sig-cluster-lifecycle-kops"                   |     1
- "sig-instrumentation-usage-metrics-collector"                                                                               |     1
- "sig-k8s-infra-groups"                                                                                                      |     1
- "sig-k8s-infra-k8sio"                                                                                                       |     1
- "google-aws, kops-distro-flatcar, kops-distros, kops-k8s-ci, kops-latest, kops-network-plugins, sig-cluster-lifecycle-kops" |     1
- "google-aws, kops-distro-deb12, kops-distros, kops-k8s-stable, kops-latest, sig-cluster-lifecycle-kops"                     |     1
-(218 rows)
-
-#+end_example
 
 
 When I last ran it, I got 3 results returned.
@@ -547,15 +135,6 @@ select count(job)
   from prow.job_label
  where label = 'preset-dind-enabled';
 #+end_src
-
-#+RESULTS:
-#+begin_SRC example
- count
--------
-   439
-(1 row)
-
-#+end_SRC
 
 This will be many more, likely, so I just asked for the count.
 
@@ -581,39 +160,6 @@ select job, label, content
  limit 25 ;
 #+end_src
 
-#+RESULTS:
-#+begin_SRC example
-                  job                   |               label               |                content
-----------------------------------------+-----------------------------------+----------------------------------------
- build-win-soak-test-cluster            | created-by-prow                   | true
- build-win-soak-test-cluster            | preset-azure-anonymous-pull       | true
- build-win-soak-test-cluster            | preset-azure-cred-only            | true
- build-win-soak-test-cluster            | preset-capz-containerd-1-7-latest | true
- build-win-soak-test-cluster            | preset-dind-enabled               | true
- build-win-soak-test-cluster            | preset-kind-volume-mounts         | true
- build-win-soak-test-cluster            | preset-service-account            | true
- build-win-soak-test-cluster            | prow.k8s.io/build-id              | 1670235079059705856
- build-win-soak-test-cluster            | prow.k8s.io/context               |
- build-win-soak-test-cluster            | prow.k8s.io/id                    | 5f322e9d-d8ee-4845-b597-935d0c4ba4b3
- build-win-soak-test-cluster            | prow.k8s.io/job                   | build-win-soak-test-cluster
- build-win-soak-test-cluster            | prow.k8s.io/refs.base_ref         | main
- build-win-soak-test-cluster            | prow.k8s.io/refs.org              | kubernetes-sigs
- build-win-soak-test-cluster            | prow.k8s.io/refs.repo             | cluster-api-provider-azure
- build-win-soak-test-cluster            | prow.k8s.io/type                  | periodic
- canary-e2e-gce-cloud-provider-disabled | created-by-prow                   | true
- canary-e2e-gce-cloud-provider-disabled | preset-dind-enabled               | true
- canary-e2e-gce-cloud-provider-disabled | preset-k8s-ssh                    | true
- canary-e2e-gce-cloud-provider-disabled | preset-pull-kubernetes-e2e        | true
- canary-e2e-gce-cloud-provider-disabled | preset-pull-kubernetes-e2e-gce    | true
- canary-e2e-gce-cloud-provider-disabled | preset-service-account            | true
- canary-e2e-gce-cloud-provider-disabled | prow.k8s.io/build-id              | 1670028715809050624
- canary-e2e-gce-cloud-provider-disabled | prow.k8s.io/context               |
- canary-e2e-gce-cloud-provider-disabled | prow.k8s.io/id                    | ad257058-3ced-4003-b5bd-dbe1a19c3656
- canary-e2e-gce-cloud-provider-disabled | prow.k8s.io/job                   | canary-e2e-gce-cloud-provider-disabled
-(25 rows)
-
-#+end_SRC
-
 We can do a frequency count for the types of labels (note: this prolly isn't an interesting query, but useful for showing some sql tricks)
 
 #+begin_src sql-mode
@@ -631,64 +177,6 @@ select distinct label, count(distinct job)
  limit 50;
 #+end_src
 
-#+RESULTS:
-#+begin_SRC example
-                     label                      | count
-------------------------------------------------+-------
- created-by-prow                                |   439
- preset-dind-enabled                            |   439
- prow.k8s.io/build-id                           |   439
- prow.k8s.io/context                            |   439
- prow.k8s.io/id                                 |   439
- prow.k8s.io/job                                |   439
- prow.k8s.io/type                               |   439
- prow.k8s.io/refs.base_ref                      |   429
- prow.k8s.io/refs.org                           |   429
- prow.k8s.io/refs.repo                          |   429
- preset-kind-volume-mounts                      |   299
- preset-service-account                         |   200
- preset-azure-cred-only                         |    89
- preset-azure-anonymous-pull                    |    86
- event-GUID                                     |    71
- prow.k8s.io/refs.pull                          |    70
- prow.k8s.io/is-optional                        |    68
- preset-aws-credential                          |    61
- preset-aws-ssh                                 |    61
- preset-k8s-ssh                                 |    32
- preset-windows-private-registry-cred           |    11
- preset-capz-containerd-1-7-latest              |    10
- preset-azure-capz-sa-cred                      |     9
- preset-capz-serial-slow                        |     8
- preset-e2e-kubemark-common                     |     8
- preset-e2e-scalability-periodics               |     8
- preset-capz-windows-common                     |     7
- preset-capz-windows-2019                       |     6
- preset-capz-gmsa-setup                         |     5
- preset-do-credential                           |     5
- preset-aws-credential-aws-oss-testing          |     4
- preset-azure-cred                              |     4
- preset-capz-containerd-1-6-latest              |     4
- preset-e2e-scalability-periodics-master        |     4
- preset-pull-kubernetes-e2e                     |     4
- preset-pull-kubernetes-e2e-gce                 |     4
- preset-azure-secrets-store-creds               |     3
- prow.k8s.io/retest                             |     3
- preset-azure-windows                           |     2
- preset-bazel-remote-cache-enabled              |     2
- preset-capz-windows-2022                       |     2
- preset-capz-windows-common-124                 |     2
- preset-capz-windows-common-127                 |     2
- preset-capz-windows-parallel                   |     2
- preset-cluster-api-provider-vsphere-e2e-config |     2
- preset-cluster-api-provider-vsphere-gcs-creds  |     2
- created-by-tide                                |     1
- preset-capz-windows-azuredisk                  |     1
- preset-capz-windows-ci-entrypoint-common-main  |     1
- preset-capz-windows-common-125                 |     1
-(50 rows)
-
-#+end_SRC
-
 ** Example: Looking into the jobs without a cluster
 Before, we found the cluster-free jobs with
 
@@ -698,17 +186,6 @@ select job
  where spec.cluster is null
  group by job;
 #+end_src
-
-#+RESULTS:
-#+begin_SRC example
-                     job
-----------------------------------------------
- ci-containerd-build-1-7
- ci-kubernetes-e2e-gci-gce-slow
- ci-kubernetes-kind-conformance-parallel-ipv6
-(3 rows)
-
-#+end_SRC
 
 this returns some # of jobs(usually 3-9)
 
@@ -722,17 +199,6 @@ select job, data
  where spec.cluster is null;
 #+end_src
 
-#+RESULTS:
-#+begin_SRC example
-                     job                      |                                               data
-----------------------------------------------+--------------------------------------------------------------------------------------------------
- ci-containerd-build-1-7                      | {"ProwJob not found": "prowjobs.prow.k8s.io \"be24cc49-e1be-4431-8910-caaf2f45b844\" not found"}
- ci-kubernetes-kind-conformance-parallel-ipv6 | {"ProwJob not found": "prowjobs.prow.k8s.io \"30fcf739-16b5-4492-88af-7ab6ccd2dc47\" not found"}
- ci-kubernetes-e2e-gci-gce-slow               | {"ProwJob not found": "prowjobs.prow.k8s.io \"bcd08b57-5855-4cc8-8c3a-39883a406973\" not found"}
-(3 rows)
-
-#+end_SRC
-
 It's spec is just the note "ProwJob not found".
 
 This bit of json is being pulled direct from their spyglass link, which we can grab with the below query
@@ -745,17 +211,6 @@ select job, url
  where spec.cluster is null;
 #+end_src
 
-#+RESULTS:
-#+begin_SRC example
-                     job                      |                                                         url
-----------------------------------------------+----------------------------------------------------------------------------------------------------------------------
- ci-containerd-build-1-7                      | https://prow.k8s.io/view/gs/kubernetes-jenkins/logs/ci-containerd-build-1-7/1669944912734326784/
- ci-kubernetes-kind-conformance-parallel-ipv6 | https://prow.k8s.io/view/gs/kubernetes-jenkins/logs/ci-kubernetes-kind-conformance-parallel-ipv6/1669944912977596416
- ci-kubernetes-e2e-gci-gce-slow               | https://prow.k8s.io/view/gs/kubernetes-jenkins/logs/ci-kubernetes-e2e-gci-gce-slow/1669944912839184384/
-(3 rows)
-
-#+end_SRC
-
 
 Zooming out, we can organize all the successful jobs by the clusters they use.
 The row at the bottom will be for the null clusters, e.g. without prowjob
@@ -765,40 +220,6 @@ definitions.
 \d+ prow.job_spec
 #+end_src
 
-#+RESULTS:
-#+begin_example
-                                View "prow.job_spec"
-      Column       | Type  | Collation | Nullable | Default | Storage  | Description
--------------------+-------+-----------+----------+---------+----------+-------------
- job               | text  |           |          |         | extended |
- refs              | jsonb |           |          |         | extended |
- type              | jsonb |           |          |         | extended |
- agent             | jsonb |           |          |         | extended |
- report            | jsonb |           |          |         | extended |
- cluster           | jsonb |           |          |         | extended |
- context           | jsonb |           |          |         | extended |
- pod_spec          | jsonb |           |          |         | extended |
- namespace         | jsonb |           |          |         | extended |
- rerun_command     | jsonb |           |          |         | extended |
- prowjob_defaults  | jsonb |           |          |         | extended |
- decoration_config | jsonb |           |          |         | extended |
-View definition:
- SELECT job.job,
-    (job.data -> 'spec'::text) -> 'refs'::text AS refs,
-    (job.data -> 'spec'::text) -> 'type'::text AS type,
-    (job.data -> 'spec'::text) -> 'agent'::text AS agent,
-    (job.data -> 'spec'::text) -> 'report'::text AS report,
-    (job.data -> 'spec'::text) -> 'cluster'::text AS cluster,
-    (job.data -> 'spec'::text) -> 'context'::text AS context,
-    (job.data -> 'spec'::text) -> 'pod_spec'::text AS pod_spec,
-    (job.data -> 'spec'::text) -> 'namespace'::text AS namespace,
-    (job.data -> 'spec'::text) -> 'rerun_command'::text AS rerun_command,
-    (job.data -> 'spec'::text) -> 'prowjob_defaults'::text AS prowjob_defaults,
-    (job.data -> 'spec'::text) -> 'decoration_config'::text AS decoration_config
-   FROM prow.job;
-
-#+end_example
-
 
 #+begin_src sql-mode
 select cluster, count(*)
@@ -806,19 +227,5 @@ select cluster, count(*)
  group by cluster
  order by count desc;
 #+end_src
-
-#+RESULTS:
-#+begin_SRC example
-            cluster             | count
---------------------------------+-------
- "default"                      |   705
- "k8s-infra-prow-build"         |   164
- "eks-prow-build-cluster"       |   141
- "k8s-infra-prow-build-trusted" |    65
- "test-infra-trusted"           |    10
-                                |     3
-(6 rows)
-
-#+end_SRC
 
 Is there any pattern that connects these jobs without prowjobs?
