@@ -1,0 +1,41 @@
+
+#+title: Testing sql src blocks
+#+PROPERTY: header-args:sql+ :dbuser (format "%s" sql-user) :dbpassword (format "%s" sql-password) :dbhost (format "%s" sql-server) :database (format "%s" sql-database) :engine postgres
+#+PROPERTY: header-args:sql-mode+ :product postgres
+
+* Setting variables
+
+#+begin_src elisp :results silent
+(setq-local
+ sql-user "postgres"
+ sql-database "postgres"
+ sql-password "infra"
+ sql-server "localhost"
+ sql-port "5432")
+#+end_src
+
+
+#+begin_src sql
+select * from describe_relations();
+#+end_src
+
+* Else
+#+begin_src sql-mode
+select * from describe_relations();
+#+end_src
+
+#+RESULTS:
+#+begin_SRC example
+ schema |      name      |                         description
+--------+----------------+-------------------------------------------------------------
+ sigs   | committee      | each committee in the kubernetes sigs.yaml
+ sigs   | sig            | each sig in the kubernetes sigs.yaml
+ sigs   | user_group     | each usergroup in the kubernetes sigs.yaml
+ sigs   | working_group  | each working group in the kubernetes sigs.yaml
+ prow   | job_annotation | every annotation of a job take from the prowspec of the job
+ prow   | job_label      | every label of a job take from the prowspec of the job
+ prow   | job_spec       | the spec from a prowjob.json expanded into sql columns
+ prow   | latest_success | The most recent successful build of each job in prow.deck
+(8 rows)
+
+#+end_SRC
