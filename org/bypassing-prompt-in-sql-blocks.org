@@ -4,11 +4,13 @@
 
 * The Goal
 
-When writing org files that utilize sql codce, we'd like to be able to automatically set the header so that a person can just hit enter on the code block and see the result, without having to put in all the login details.
+When writing org files that utilize sql codce, we'd like to be able to
+automatically set the header so that a person can just hit enter on the code
+block and see the result, without having to put in all the login details.
 
 * Solution
 Potentially the easiest solution is to use `sql` instead of `sql-mode` as the
-language in our src blocks, then use header arg properties like in line 3 of
+language in our src blocks, then use header arg properties like in line 2 of
 this org file.
 
 * Context
