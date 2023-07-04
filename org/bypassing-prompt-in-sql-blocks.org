@@ -1,0 +1,131 @@
+#+title: Setting defaults for sql src blocks
+#+PROPERTY: header-args:sql+ :dbuser (format "%s" sql-user) :dbpassword (format "%s" sql-password) :dbhost (format "%s" sql-server) :database (format "%s" sql-database) :engine postgres
+#+PROPERTY: header-args:sql-mode+ :product postgres
+
+* The Goal
+
+When writing org files that utilize sql codce, we'd like to be able to
+automatically set the header so that a person can just hit enter on the code
+block and see the result, without having to put in all the login details.
+
+* Solution
+Potentially the easiest solution is to use `sql` instead of `sql-mode` as the
+language in our src blocks, then use header arg properties like in line 2 of
+this org file.
+
+* Context
+** The different sql block languages
+There are two languages we can use for src blocks using sql: `sql` and
+`sql-mode`. For clarity, i'll refer to the first one as `sql.el`.
+
+A block like so:
+
+#+begin_src sql
+select 1;
+#+end_src
+
+uses org-babel's built in sql support, which is documented here:
+https://orgmode.org/worg/org-contrib/babel/languages/ob-doc-sql.html
+
+Blocks like so
+
+#+begin_src sql-mode
+select 1;
+#+end_src
+
+uses `ob-sql-mode`, which we install separately in our packages.el. It's documentation is here:
+https://github.com/nikclayton/ob-sql-mode
+
+* Benefits of ob-sql-mode
+** Can use any sql backend
+This is mostly not relevant to us, as sql.el supports postgres by default. This would be a benefit
+if we chose to do this all in sqlite, but that has not come up yet.
+** Supports multiple sessions in one org file
+This menas that we can have one org file with src blocks being sent to multiple databases,
+like the demo we did sending some code to infrasnoop and some to apisnoop.  This is nice, but
+I would argue that this scenario does not come up much.  I also think org files benefit by
+having a narrower focus, like a single db.
+** Sql indirect buffer
+All commands are sent to a sql buffer that is easy to access or close if an error comes up.
+* Downsides of ob-sql-mode
+** Slowly maintained (maybe not maintained?)
+There have been no code changes to the repo in 4 years.  Hippie has had an open issue with the repo,
+with no response, for 4 years.
+** Different header arguments to sql.el
+can only pass in the product and session. This can make documentation confusing, having to remember we
+are using a derivation of sql.el and not sql.el itself.
+** Hard to customize
+I've been studying the source code to try to find a spot where we could adjust the header arguments or
+make it not bring up a prompt, and the code is hard to parse or extend.  There are a lot of extensions to
+customizations, and terse variables that make it hard to read (for me).  Would be difficult, i think to extend this.
+* Benefits of sql.el
+** We can pass in more header args
+instead of a prompt, it looks for set variables. This means we can set them at the top of the file and bypass the prompt.
+** no dependencies
+it is built into emacs, and so we can remove ob-sql-mode from the list of things we have to bring down and maintain.
+* Downsides of sql.el
+** No indirect buffer
+stuff is sent straight to a psql process, but I can't figure out how to inspect that process.
+** We chose ob-sql-mode for some reason
+At some point in our past we found that sql.el did not work for us.  I am not sure why this is, but
+we may find something interferes with our flow that made us seek out ob-sql-mode in the first place.
+Our flow has changed enough in the last few years, though, that even if there was an issue before it
+may not matter now.
+
+* How to bypass the prompt using sql.el
+A sql.el src block expects the header args to tell it where to conect, e.g.:
+
+#+begin_src sql :dbuser postgres :dbpassword infra :database postgres :dbhost localhost
+select * from describe_relations();
+#+end_src
+
+#+RESULTS:
+| schema | name           | description                                                 |
+|--------+----------------+-------------------------------------------------------------|
+| sigs   | committee      | each committee in the kubernetes sigs.yaml                  |
+| sigs   | sig            | each sig in the kubernetes sigs.yaml                        |
+| sigs   | user_group     | each usergroup in the kubernetes sigs.yaml                  |
+| sigs   | working_group  | each working group in the kubernetes sigs.yaml              |
+| prow   | job_annotation | every annotation of a job take from the prowspec of the job |
+| prow   | job_label      | every label of a job take from the prowspec of the job      |
+| prow   | job_spec       | the spec from a prowjob.json expanded into sql columns      |
+| prow   | latest_success | The most recent successful build of each job in prow.deck   |
+
+We can set all those header args as a property at the top of the file.  However, that could make them
+hard to see and non-obvious to change.
+
+So instead, I do some function redirection in that top property and have a heading at the top where
+we set our vars
+
+So the property looks like so:
+
+: #+PROPERTY: header-args:sql+ :dbuser (format "%s" sql-user) :dbpassword (format "%s" sql-password) :dbhost (format "%s" sql-server) :database (format "%s" sql-database) :engine postgres
+And then we have a section that someone can customize and hit enter on to set:
+
+#+NAME: set variables
+#+begin_src elisp :results silent
+(setq-local
+ sql-user "postgres"
+ sql-database "postgres"
+ sql-password "infra"
+ sql-server "localhost"
+ sql-port "5432")
+#+end_src
+
+and now this block will work without a prompt.
+
+#+begin_src sql
+select * from describe_relations();
+#+end_src
+
+#+RESULTS:
+| schema | name           | description                                                 |
+|--------+----------------+-------------------------------------------------------------|
+| sigs   | committee      | each committee in the kubernetes sigs.yaml                  |
+| sigs   | sig            | each sig in the kubernetes sigs.yaml                        |
+| sigs   | user_group     | each usergroup in the kubernetes sigs.yaml                  |
+| sigs   | working_group  | each working group in the kubernetes sigs.yaml              |
+| prow   | job_annotation | every annotation of a job take from the prowspec of the job |
+| prow   | job_label      | every label of a job take from the prowspec of the job      |
+| prow   | job_spec       | the spec from a prowjob.json expanded into sql columns      |
+| prow   | latest_success | The most recent successful build of each job in prow.deck   |
